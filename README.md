@@ -1,4 +1,4 @@
-# 银耳浏览器（Yiner Browser）0.1.0
+# 银耳浏览器（Yiner Browser）0.2.0
 
 个人自用的 Android 浏览器。交互上参考了“以搜索为入口、标签自动归档”的极简移动浏览器理念，但所有代码、名称、图标和配色均为独立实现，与任何浏览器厂商无关，也不代表任何官方产品。
 
@@ -19,11 +19,13 @@
 
 ## 安装
 
+从 [GitHub Releases](https://github.com/yinerx/yiner-browser/releases) 下载最新正式版的 `yiner-browser-<版本>.apk`，然后：
+
 ```bash
-adb install -r yiner-browser-0.1.0-debug-arm64.apk
+adb install -r yiner-browser-0.2.0.apk
 ```
 
-也可以把 APK 拷到手机上，用文件管理器打开安装（需要允许“安装未知应用”）。
+也可以把 APK 拷到手机上，用文件管理器打开安装（需要允许“安装未知应用”）。之后的版本可以在应用内更新，见下文“应用内更新”。
 
 首次启动时会在本地安装内置的 uBlock Origin，大约需要几秒钟，进度可在“设置 → 广告屏蔽”中查看。
 
@@ -54,10 +56,11 @@ adb install -r yiner-browser-0.1.0-debug-arm64.apk
 | 加载错误页 | 已实现 | 中文错误页；**证书/安全错误只提示，不提供“继续访问”**，不绕过 TLS 校验 |
 | 深色模式 | 已实现 | 跟随系统，网页的 `prefers-color-scheme` 也跟随系统 |
 | 仅 HTTPS 模式 | 已实现 | 设置中可开启，默认关闭 |
+| 应用内更新 | 已实现，**未真机验证** | 只读取本仓库 GitHub 正式版 Release；自动下载、通知；安装前校验哈希、包名、versionCode 和签名；安装由系统确认。见下文“应用内更新” |
 
 ### 明确不包含
 
-AI 搜索/总结、账号与云同步、密码管理器（请使用系统自动填充或第三方密码管理器）、uBlock Origin 以外的扩展、网页推送通知（网站请求会被拒绝）、XR、文件夹上传、下载断点续传（进程被杀后未完成的下载标记为失败）、阅读模式、书签、上架应用商店、自动更新。
+AI 搜索/总结、账号与云同步、密码管理器（请使用系统自动填充或第三方密码管理器）、uBlock Origin 以外的扩展、网页推送通知（网站请求会被拒绝）、XR、文件夹上传、下载断点续传（进程被杀后未完成的下载标记为失败）、阅读模式、书签、上架应用商店、静默安装更新（更新安装始终需要你在系统对话框中确认）。
 
 ## 关于 Google 登录
 
@@ -82,8 +85,80 @@ AI 搜索/总结、账号与云同步、密码管理器（请使用系统自动�
 ## 隐私
 
 - 应用代码本身没有任何统计、遥测或崩溃上报，也没有接入 Glean/Firebase 等 SDK。
-- 会联网的功能：你访问的网站；搜索联想（发送给所选搜索引擎，可关闭）；Gecko 的安全浏览列表更新（Mozilla 代理的 Safe Browsing 服务）；uBlock Origin 的过滤规则更新；手动检查扩展更新（AMO）。
+- 会联网的功能：你访问的网站；搜索联想（发送给所选搜索引擎，可关闭）；Gecko 的安全浏览列表更新（Mozilla 代理的 Safe Browsing 服务）；uBlock Origin 的过滤规则更新；手动检查扩展更新（AMO）；检查应用更新（只请求 `api.github.com` 上本仓库的公开 Release 信息，不带任何 token 或个人信息，可在设置中关闭）。
 - 应用数据不参与 Android 云备份或设备迁移（`allowBackup=false` + `dataExtractionRules` 全部排除）。
+
+## 应用内更新
+
+“设置 → 更新”中可以手动检查更新，也可以开关以下选项：
+
+| 选项 | 默认 | 说明 |
+|---|---|---|
+| 启动时检查更新 | 开 | 打开应用时检查；距上次检查不足 12 小时则跳过，不会真正请求 GitHub |
+| 定期检查更新 | 开 | WorkManager 约每天一次，在联网时后台检查（同样受 12 小时限频） |
+| 自动下载新版本 | 开 | 发现新版本后自动下载，完成后发通知 |
+| 仅在 Wi-Fi 下自动下载 | 开 | 安装包约 200 MB。手动点“下载”或“用移动数据下载”不受此限制 |
+
+手动“检查更新”两次之间至少间隔 1 分钟。GitHub 未认证 API 每个 IP 每小时限 60 次；被限流时，应用会显示解除时间，并在此之前不再请求。另外使用 ETag 条件请求，Release 没有变化时 GitHub 返回 304，不消耗额度。
+
+### 工作方式与安全校验
+
+1. **只看本仓库的正式版**。请求 `https://api.github.com/repos/yinerx/yiner-browser/releases/latest`（公开 API，不内置也不读取任何 token）。该接口本身只返回非 draft、非 prerelease 的最新版本，应用也会再检查一遍这两个标志。
+2. **只信任本仓库该次 Release 的附件**。`yiner-update.json` 和 APK 的下载地址必须严格等于 `https://github.com/yinerx/yiner-browser/releases/download/<tag>/<文件名>`：必须 HTTPS，不能带端口、用户信息或查询参数。下载时手动跟随重定向，每一跳都必须是 HTTPS，且主机只能是 `github.com`、`objects.githubusercontent.com`、`release-assets.githubusercontent.com`。应用不接受任何用户输入的 URL，也不使用元数据里的 URL。
+3. **只比较 versionCode**。只有远端 `versionCode` 大于当前安装版本时才算有更新；`versionName` 仅用于显示。设置页会显示远端版本号和发布说明。
+4. **下载**：在应用私有目录 `files/updates/` 中进行，支持断点续传。断网、被系统暂停或达到后台执行时限时保留已下载部分，WorkManager 按指数退避自动重试（最多 8 次）。404/410 视为 Release 文件不存在，直接失败；403/429/5xx 稍后重试；空间不足时提示所需大小。可以随时“取消下载”。
+5. **安装前校验**（下载完成后做一次，点“安装”时再做一次），任一项不通过都会删除安装包并拒绝安装：
+   - 文件大小、SHA-256 与 `yiner-update.json` 一致；如果 GitHub 为该附件提供了服务端计算的 `digest`，也必须一致；
+   - APK 的包名是 `io.yiner.browser`；
+   - APK 的 versionCode 与发布信息一致，且大于当前版本；
+   - APK 的签名证书集合与当前已安装应用**完全一致**。
+
+   注意：`yiner-update.json` 和 SHA256 与 APK 来自同一个 Release，只能防止文件损坏或下载过程中被替换，**不能代替数字签名**。真正证明“这是同一个发布者”的是第 4 条签名检查；Android 系统安装时也会再做一次同样的签名检查。
+6. **安装**：先确认已授予“安装未知应用”权限；没有授予时会解释原因，并跳转到系统设置页面。随后把 APK 从私有目录直接写入 `PackageInstaller` 会话（不经 FileProvider 对外暴露文件），由系统弹出安装确认，**必须由你点“安装”**。Android 12+ 明确设置了 `USER_ACTION_REQUIRED`。应用不会尝试静默安装，也不使用 root 或无障碍服务。
+7. 安装完成后，旧进程会被系统结束；再次打开时，新版本会自动清理下载文件。
+
+### 重要：签名必须一致
+
+应用内更新只会安装与当前已安装应用**同一签名**的包。因此：
+
+- 自己本地构建的 debug 包（调试签名）**无法**通过应用内更新升级到 GitHub 发布的正式版，会显示“签名证书与当前应用不同”。需要先卸载（会丢失标签、历史和登录状态），再安装 Release 中的 APK。从那以后，正式版之间就可以在应用内更新了。
+- 发布签名的密钥一旦丢失或更换，已安装的用户就无法再通过应用内更新升级。
+
+## 发布新版本（维护者）
+
+发布由 GitHub Actions 工作流 `.github/workflows/release.yml` 完成。它会构建签名 APK，生成 `yiner-update.json`（包名、versionCode、versionName、minSdk、文件名、SHA-256、大小，全部用 `aapt2` 从签名后的 APK 中读出），再生成 `SHA256SUMS.txt`，然后创建正式 Release。**只有构建产物、没有 Release 的话，应用检查不到更新。**
+
+### 一次性准备：仓库 secrets
+
+在仓库 Settings → Secrets and variables → Actions 中配置（只写在 GitHub，不进仓库）：
+
+| 名称 | 内容 |
+|---|---|
+| `SIGNING_KEYSTORE_BASE64` | 发布 keystore 文件的 Base64 |
+| `SIGNING_STORE_PASSWORD` | keystore 密码 |
+| `SIGNING_KEY_ALIAS` | 密钥别名 |
+| `SIGNING_KEY_PASSWORD` | 密钥密码 |
+
+缺少任何一项，发布工作流都会直接失败，不会发布未签名或调试签名的包。工作流把 keystore 解码到 runner 的临时目录，构建结束后（无论成败）立即删除。
+
+### 每次发布
+
+1. 在 `app/build.gradle.kts` 中把 `versionCode` **加 1 或更多**（必须大于上一个正式版，工作流会自动检查），并更新 `versionName`。
+2. 可选：写 `docs/release-notes/v<版本>.md` 作为发布说明；没有这个文件时使用 GitHub 自动生成的说明。
+3. 提交并推送到 `main`，等 CI 通过。
+4. 触发发布，二选一：
+   - 推送 tag：`git tag v0.2.0 && git push origin v0.2.0`（tag 必须等于 `v` + versionName）
+   - 或在 GitHub 的 Actions → Release → Run workflow 中选择 `main` 分支，输入 tag（如 `v0.2.0`）
+5. 工作流会先以草稿上传全部附件，再一次性发布为正式版（Latest），避免应用读到附件还没传完的 Release。已存在同名 Release 时直接失败，不会覆盖。
+
+发布后，已安装同一签名正式版的手机会在下次检查时发现更新（启动时，或每天一次的定期检查；也可以在设置中手动检查）。
+
+### CI 与安全
+
+- `.github/workflows/ci.yml`：每次 push 和 PR 都运行 `lintDebug testDebugUnitTest assembleDebug`。使用 `pull_request` 而不是 `pull_request_target`，并且不引用任何 secret，所以 fork 来的 PR 拿不到 secrets。PR 只读 Gradle 缓存。
+- 两个工作流默认 `permissions: contents: read`，只有发布任务提升到 `contents: write`。
+- 所有第三方 action 都锁定到完整 commit SHA（注释中标明对应版本）。
+- checkout 使用 `persist-credentials: false`；手动输入的 tag 只通过环境变量传给脚本，并先做格式校验。
 
 ## 从源码构建
 
@@ -104,17 +179,12 @@ export ANDROID_HOME=/path/to/android-sdk     # 或在 local.properties 中写 sd
 
 ### 签名
 
-- 仓库不包含任何签名密钥。debug 包使用本机 Android 默认调试签名（通常由构建工具自动生成）。不同电脑上的调试签名可能不同，如果无法覆盖安装，需要先卸载旧包（会丢失标签、历史和登录状态）。
-- 如果要做 release 包，请在自己的电脑上生成私有密钥并妥善保管（丢了就不能覆盖升级）：
-
-  ```bash
-  keytool -genkeypair -keystore my-release.keystore -alias yiner -keyalg RSA -keysize 2048 -validity 10000
-  ./gradlew assembleRelease
-  $ANDROID_HOME/build-tools/37.0.0/zipalign -p -f 4 app/build/outputs/apk/release/app-release-unsigned.apk aligned.apk
-  $ANDROID_HOME/build-tools/37.0.0/apksigner sign --ks my-release.keystore --out yiner-release.apk aligned.apk
-  ```
-
-  注意：release 包和 debug 包签名不同，从 debug 换到 release 需要先卸载（会丢失标签、历史和登录状态）。
+- 仓库不包含任何签名密钥（`.gitignore` 排除了 `*.keystore`、`*.jks`）。debug 包使用本机 Android 默认调试签名。不同电脑上的调试签名可能不同，如果无法覆盖安装，需要先卸载旧包（会丢失标签、历史和登录状态）。
+- release 构建从环境变量读取签名配置：`YINER_KEYSTORE_FILE`（keystore 文件路径）、`SIGNING_STORE_PASSWORD`、`SIGNING_KEY_ALIAS`、`SIGNING_KEY_PASSWORD`。
+  - 四项都有：使用该密钥签名。
+  - 缺任何一项：本地 `./gradlew assembleRelease` 回退到调试签名，保证任何人都能构建；
+  - 加上 `-Pyiner.requireReleaseSigning=true`（发布工作流使用）：直接失败。
+- 正式发布请走上面的 GitHub Actions 流程，不要把本地构建的包当作正式版分发。
 
 ### 升级 GeckoView
 
@@ -126,11 +196,15 @@ GeckoView 的安全更新只能靠重新构建获得。修改 `app/build.gradle.
 app/src/main/java/io/yiner/browser/
 ├── YinerApp.kt            Application：GeckoRuntime、数据库、设置（全部懒加载，GeckoView 子进程中不初始化）
 ├── MainActivity.kt        外部 Intent、系统权限、文件选择/拍照、外链确认、下载确认、默认浏览器
-├── core/                  纯 Kotlin 逻辑（有单元测试）：输入解析、外链策略、返回策略、归档策略、下载文件名
+├── core/                  纯 Kotlin 逻辑（有单元测试）：输入解析、外链策略、返回策略、归档策略、下载文件名、更新校验
 ├── browser/               TabManager（标签与 GeckoSession）、网页对话框、权限、uBlock Origin 安装与 ETP 设置、错误页
 ├── data/                  SQLite（历史/归档/下载）、设置、搜索联想
 ├── download/              下载调度与前台服务
-└── ui/                    Compose 界面
+├── update/                应用内更新：GitHub API、可信下载、WorkManager 任务、PackageInstaller 安装、通知
+└── ui/                    Compose 界面（设置页“更新”分区在 UpdateSection.kt）
+core/update/               更新的纯逻辑（有单元测试）：Release/元数据解析、可信来源、versionCode 比较、安装前校验、限频
+scripts/make_update_metadata.py   发布时生成 yiner-update.json 与 SHA256SUMS.txt
+.github/workflows/         ci.yml（检查）与 release.yml（发布）
 ```
 
 ## 第三方许可

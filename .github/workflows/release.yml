@@ -1,0 +1,155 @@
+# 发布正式版：构建签名 APK，生成 yiner-update.json 与 SHA256SUMS.txt，创建 GitHub Release。
+# 应用内“检查更新”只读取这里发布的正式版（非 draft、非 prerelease）。
+#
+# 触发方式：
+#   1. 推送 tag：git tag v0.2.0 && git push origin v0.2.0
+#   2. 在 Actions 页面手动运行（只能选 main 分支），输入 tag，例如 v0.2.0
+#
+# 需要的仓库 secrets（只在本工作流的签名/构建步骤中使用，绝不输出到日志）：
+#   SIGNING_KEYSTORE_BASE64  SIGNING_STORE_PASSWORD  SIGNING_KEY_ALIAS  SIGNING_KEY_PASSWORD
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要发布的 tag（必须等于 v + versionName，例如 v0.2.0）"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # fork 中运行没有意义（没有 secrets），直接跳过
+    if: github.repository == 'yinerx/yiner-browser'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      # 不在 run 脚本中直接展开 inputs，统一经环境变量传入并校验格式
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Validate trigger
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::tag 格式无效：$TAG（应类似 v0.2.0）"; exit 1
+          fi
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::手动发布只能在 main 分支上运行"; exit 1
+          fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "::error::Release $TAG 已存在，不会覆盖。请提升 versionCode/versionName 后用新 tag 发布"; exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Check existing tag
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if git rev-parse -q --verify "refs/tags/$TAG" > /dev/null; then
+            if [ "$(git rev-list -n 1 "$TAG")" != "$GITHUB_SHA" ]; then
+              echo "::error::tag $TAG 已存在且指向其它提交"; exit 1
+            fi
+          fi
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install Android SDK packages
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null
+          "$SDKMANAGER" "platforms;android-37.2" "build-tools;37.0.0" "platform-tools" > /dev/null
+          echo "BUILD_TOOLS=$ANDROID_HOME/build-tools/37.0.0" >> "$GITHUB_ENV"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-read-only: true
+
+      - name: Prepare signing key
+        env:
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          missing=""
+          for v in SIGNING_KEYSTORE_BASE64 SIGNING_STORE_PASSWORD SIGNING_KEY_ALIAS SIGNING_KEY_PASSWORD; do
+            [ -n "${!v}" ] || missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::缺少签名 secrets：$missing。不会发布未签名或调试签名的版本"; exit 1
+          fi
+          umask 077
+          printf '%s' "$SIGNING_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/yiner-release.keystore"
+          echo "YINER_KEYSTORE_FILE=$RUNNER_TEMP/yiner-release.keystore" >> "$GITHUB_ENV"
+
+      - name: Build signed release
+        env:
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon lintDebug testDebugUnitTest assembleRelease -Pyiner.requireReleaseSigning=true
+
+      - name: Remove signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/yiner-release.keystore"
+
+      - name: Verify signature
+        run: |
+          APK=app/build/outputs/apk/release/app-release.apk
+          "$BUILD_TOOLS/apksigner" verify --print-certs "$APK" | tee signer.txt
+          if grep -q "CN=Android Debug" signer.txt; then
+            echo "::error::release 包使用了调试签名，拒绝发布"; exit 1
+          fi
+
+      - name: Fetch previous release metadata
+        run: |
+          mkdir -p prev
+          if gh release download --repo "$GITHUB_REPOSITORY" --pattern yiner-update.json --dir prev 2> /dev/null; then
+            echo "已下载上一个正式版的 yiner-update.json"
+          else
+            echo "没有上一个正式版（首次发布）"
+          fi
+
+      - name: Generate update metadata and checksums
+        run: |
+          python3 -I scripts/make_update_metadata.py \
+            --apk app/build/outputs/apk/release/app-release.apk \
+            --aapt2 "$BUILD_TOOLS/aapt2" \
+            --tag "$TAG" \
+            --out dist \
+            --previous prev/yiner-update.json
+          cat dist/SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        run: |
+          VERSION="${TAG#v}"
+          NOTES_ARGS=(--generate-notes)
+          if [ -f "docs/release-notes/$TAG.md" ]; then NOTES_ARGS=(--notes-file "docs/release-notes/$TAG.md"); fi
+          # 先以草稿上传全部附件，再一次性发布，避免客户端看到“附件还没传完”的 Release
+          gh release create "$TAG" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "银耳浏览器 $VERSION" \
+            --target "$GITHUB_SHA" \
+            --draft \
+            "${NOTES_ARGS[@]}"
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease=false --latest

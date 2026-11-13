@@ -8,6 +8,7 @@ import io.yiner.browser.browser.TabManager
 import io.yiner.browser.data.BrowserDb
 import io.yiner.browser.data.Prefs
 import io.yiner.browser.download.Downloads
+import io.yiner.browser.update.UpdateManager
 import kotlinx.coroutines.MainScope
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoRuntimeSettings
@@ -22,6 +23,7 @@ class YinerApp : Application() {
     val db by lazy { BrowserDb(this).also { it.markInterruptedDownloads() } }
     val downloads by lazy { Downloads(this, db) }
     val adBlocker by lazy { AdBlocker(this, prefs) }
+    val updates by lazy { UpdateManager(this, appScope) }
 
     val runtime: GeckoRuntime by lazy {
         val s = prefs.settings.value

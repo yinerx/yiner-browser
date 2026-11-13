@@ -34,6 +34,8 @@ import io.yiner.browser.ui.BrowserApp
 import io.yiner.browser.ui.Screen
 import io.yiner.browser.ui.UiState
 import io.yiner.browser.ui.YinerTheme
+import io.yiner.browser.update.UpdateInstaller
+import io.yiner.browser.update.UpdateNotifications
 import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.WebResponse
 import java.io.File
@@ -97,6 +99,7 @@ class MainActivity : ComponentActivity(), UiHost {
         setContent { YinerTheme { BrowserApp(this) } }
 
         if (savedInstanceState == null) handleIntent(intent, coldStart = true)
+        app.updates.onAppStart()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -134,6 +137,11 @@ class MainActivity : ComponentActivity(), UiHost {
         val tm = app.tabManager
         val engine = app.prefs.settings.value.searchEngine
         when (intent.action) {
+            UpdateNotifications.ACTION_SHOW_UPDATE -> ui.openPage(Screen.SETTINGS)
+            UpdateNotifications.ACTION_INSTALL_UPDATE -> {
+                ui.openPage(Screen.SETTINGS)
+                UpdateInstaller.install(this)
+            }
             Intent.ACTION_VIEW -> {
                 val data = intent.dataString ?: return
                 if (!(data.startsWith("http://") || data.startsWith("https://"))) return

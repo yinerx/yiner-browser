@@ -366,6 +366,9 @@ fun SettingsPage(activity: MainActivity) {
             ) { v -> update { it.copy(httpsOnly = v) } }
             MenuItem("清除浏览数据") { showClear = true }
 
+            Section("更新")
+            UpdateSection(activity)
+
             Section("关于")
             MenuItem(
                 "银耳浏览器 ${BuildConfig.VERSION_NAME}",
