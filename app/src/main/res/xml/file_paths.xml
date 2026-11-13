@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 拍照上传的临时文件 -->
+    <cache-path name="captures" path="captures/" />
+    <!-- Android 8/9 下载到公共目录后用于“打开文件” -->
+    <external-path name="downloads" path="Download/" />
+</paths>

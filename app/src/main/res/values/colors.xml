@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="yiner_background">#FFFBF6EE</color>
+    <color name="yiner_accent">#FFC8892E</color>
+    <color name="yiner_icon_background">#FFF6EBD9</color>
+    <color name="yiner_icon_petal">#FFFFFDF8</color>
+    <color name="yiner_icon_shade">#FFE7C893</color>
+</resources>
