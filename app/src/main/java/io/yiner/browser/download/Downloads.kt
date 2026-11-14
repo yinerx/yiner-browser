@@ -13,16 +13,16 @@ import io.yiner.browser.data.BrowserDb
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import org.mozilla.geckoview.WebResponse
+import io.yiner.browser.browser.DownloadRequest
 import java.io.File
 import java.io.OutputStream
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
-/** 一次待执行的下载：GeckoView 已经建立好连接，正文通过 [response].body 读取。 */
+/** 一次待执行的下载：由下载服务按 [request] 自行建立 HTTPS 连接（带原标签的 Cookie），或直接写入内联内容。 */
 class DownloadJob(
     val id: Long,
-    val response: WebResponse,
+    val request: DownloadRequest,
     val fileName: String,
     val mimeType: String?,
     val totalBytes: Long,
@@ -33,7 +33,7 @@ class DownloadJob(
 class DownloadTarget(val uri: Uri, val output: OutputStream, val finish: (success: Boolean) -> String)
 
 /**
- * 下载调度：把 GeckoView 交出的响应流写入系统“下载”目录。
+ * 下载调度：按 WebView 交出的下载请求自行下载，写入系统“下载”目录。
  * 普通标签的下载记入下载列表；无痕标签的下载只保存文件、不留记录。
  */
 class Downloads(private val context: Context, private val db: BrowserDb) {
@@ -48,9 +48,11 @@ class Downloads(private val context: Context, private val db: BrowserDb) {
         _version.value++
     }
 
-    fun enqueue(response: WebResponse, fileName: String, mimeType: String?, totalBytes: Long, isPrivate: Boolean) {
-        val id = if (isPrivate) privateIds.getAndDecrement() else db.insertDownload(fileName, response.uri, mimeType, totalBytes)
-        pending[id] = DownloadJob(id, response, fileName, mimeType, totalBytes, isPrivate)
+    fun enqueue(request: DownloadRequest, fileName: String, mimeType: String?, totalBytes: Long) {
+        val isPrivate = request.isPrivate
+        val recordUrl = if (request.url.startsWith("data:")) "data:" else request.url
+        val id = if (isPrivate) privateIds.getAndDecrement() else db.insertDownload(fileName, recordUrl, mimeType, totalBytes)
+        pending[id] = DownloadJob(id, request, fileName, mimeType, totalBytes, isPrivate)
         changed()
         val intent = Intent(context, DownloadService::class.java).setAction(DownloadService.ACTION_START).putExtra(DownloadService.EXTRA_ID, id)
         ContextCompat.startForegroundService(context, intent)

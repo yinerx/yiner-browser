@@ -1,49 +1,47 @@
-# 银耳浏览器（Yiner Browser）0.2.0
+# 银耳浏览器（Yiner Browser）
 
-个人自用的 Android 浏览器。交互上参考了“以搜索为入口、标签自动归档”的极简移动浏览器理念，但所有代码、名称、图标和配色均为独立实现，与任何浏览器厂商无关，也不代表任何官方产品。
+个人自用的 Android 浏览器。界面参考 Android 版 Arc Search 公开 beta 截图的布局与交互，但代码、名称、图标、配色资产均为独立实现，与 The Browser Company 无关，也不代表任何官方产品。
 
-- 包名：`io.yiner.browser`
-- 内核：Mozilla **GeckoView 160.0**（release 通道，`org.mozilla.geckoview:geckoview-arm64-v8a:160.0.20261104181552`，MPL-2.0）
-- 界面：Kotlin + Jetpack Compose（Material 3）
-- 广告屏蔽：内置 **uBlock Origin 1.76.0**（AMO 官方签名包，GPL-3.0）+ Gecko 增强型跟踪保护
-- 第一版不含任何 AI 功能，不调用任何模型或搜索 API
+- 包名：`io.yiner.browser`（正式版）；测试版为 `io.yiner.browser.debug`
+- 内核：**基于 Chromium 的 Android 系统 WebView**（设备上的 “Android System WebView”，由系统 / Google Play 提供与更新），通过 `androidx.webkit` 使用多配置文件等新接口。它不是完整的 Chromium 浏览器，也不随本应用分发
+- 界面：Kotlin + Jetpack Compose
+- 广告与跟踪屏蔽：自研规则引擎，执行随包的 EasyList / EasyPrivacy 规则子集（见下文）
+- 没有任何 AI 功能，不调用任何模型或搜索 API
+
+> **内核变更说明**：已发布的 0.2.0 正式版使用 Mozilla GeckoView + uBlock Origin。从本分支（`feature/arc-search-android-ui`）起改为系统 WebView。用户数据的迁移边界见下文“从 0.2.0（GeckoView）升级”。
 
 ## 兼容范围
 
 | 项目 | 范围 |
 |---|---|
-| Android 版本 | **Android 8.0（API 26）及以上**。targetSdk 36，compileSdk 37.2 |
-| CPU 架构 | **仅 arm64-v8a**（2017 年后的主流 64 位手机）。不支持 32 位 ARM（armeabi-v7a）、x86/x86_64 设备、x86 模拟器 |
-| 安装体积 | APK 约 205 MB（debug 包，未压缩优化；GeckoView 内核本身就占约 150 MB） |
-| 测试状态 | **未在真机或模拟器上运行过**（构建环境没有 KVM，且 APK 只含 arm64 代码）。请按 [ACCEPTANCE.md](ACCEPTANCE.md) 在手机上验收 |
+| Android 版本 | Android 8.0（API 26）及以上；targetSdk 36，compileSdk 37.2 |
+| 系统 WebView | 需要设备上的 Android System WebView（或 Chrome 提供的 WebView）。**无痕标签**需要支持 `MULTI_PROFILE` 的较新 WebView，不支持时应用会拒绝打开无痕标签，并提示更新 WebView |
+| CPU 架构 | 不限（APK 不含浏览器引擎的原生库） |
+| 安装体积 | debug 包约 14 MB，其中过滤规则约 3.5 MB |
+| 测试状态 | **未在真机或模拟器上运行过**（构建环境没有可用的 KVM 模拟器和真机）。界面只做了离线渲染对照。请按 [ACCEPTANCE.md](ACCEPTANCE.md) 在手机上验收 |
 
 ## 安装
 
-从 [GitHub Releases](https://github.com/yinerx/yiner-browser/releases) 下载最新正式版的 `yiner-browser-<版本>.apk`，然后：
+- **正式版**：从 [GitHub Releases](https://github.com/yinerx/yiner-browser/releases) 安装。目前的正式版 0.2.0 仍是 GeckoView 内核。
+- **WebView 测试版**（本分支 debug 构建）：
+  - 包名 `io.yiner.browser.debug`，桌面名称“银耳浏览器 测试版”，可以**与正式版并存安装，不需要也不应该卸载正式版**；
+  - 使用构建机的 Android 默认**调试签名**（不是正式发布签名），所以不能覆盖安装正式版，也不参与应用内更新；
+  - 测试版和正式版的数据（标签、历史、登录状态）互相独立。
 
 ```bash
-adb install -r yiner-browser-0.2.0.apk
+adb install -r app-debug.apk   # 安装测试版，不影响已安装的正式版
 ```
 
-也可以把 APK 拷到手机上，用文件管理器打开安装（需要允许“安装未知应用”）。之后的版本可以在应用内更新，见下文“应用内更新”。
+## 界面
 
-首次启动时会在本地安装内置的 uBlock Origin，大约需要几秒钟，进度可在“设置 → 广告屏蔽”中查看。
-
-## 界面（feature/arc-search-android-ui 测试版）
-
-本分支按 Android 版 Arc Search 公开 beta（2024-10）的实操截图，重做了浏览器界面：
+按 Android Police 2024-10 公开 beta 的实操截图做像素测量后实现，依据与差异见 [docs/arc-search-android-ui-references.md](docs/arc-search-android-ui-references.md)：
 - 浏览时网页占满屏幕，底部是轻薄工具栏（标签缩略图 / 白色胶囊“+” / “^”展开菜单）；
-- 上拉的页面菜单，包括地址胶囊、固定 / 查找 / 分享、文字缩放、桌面版网站、网站设置；
+- 上拉的页面菜单：地址胶囊、固定 / 查找 / 分享、文字缩放、桌面版网站、网站设置、拦截计数；
 - 叠在网页上的搜索面板；
 - 横向标签卡片；
 - 分组式设置页。
 
-尺寸和颜色都取自参考图的像素测量，依据与差异见 [docs/arc-search-android-ui-references.md](docs/arc-search-android-ui-references.md)。
-
-需要说明的几点：
-- 仍使用 **GeckoView** 内核，还没有满足“完整 Chromium 内核”的要求，原因见 [docs/chromium-engine-feasibility.md](docs/chromium-engine-feasibility.md)；
-- 没有任何 AI 功能，也没有翻译功能；
-- 本界面**未在真机上验证**。
+没有翻译、AI 和品牌化的语音助手。界面未在真机上验证。
 
 离线渲染界面截图（不是设备截图）：
 
@@ -54,62 +52,114 @@ adb install -r yiner-browser-0.2.0.apk
 
 ## 功能与实现状态
 
-“已实现”指代码已完成并通过编译、Lint 和单元测试，**不代表已在真机上验证**。
+“已实现”指代码完成并通过编译、Lint 和单元测试，**不代表已在真机上验证**。
 
 | 功能 | 状态 | 说明 |
 |---|---|---|
-| 搜索/地址输入 | 已实现 | 自动区分网址和关键词；默认 Google，可选 Bing、DuckDuckGo、百度；历史匹配 + 搜索引擎联想（可关闭，无痕标签不联想） |
-| 多标签与主页网格 | 已实现 | 普通标签和无痕标签分组显示；最多 4 个后台标签保留活动会话，其余释放内存，切回时从保存的状态恢复 |
-| 会话恢复 | 已实现 | 普通标签的前进/后退历史（GeckoView SessionState）保存在 `files/tabs.json`，杀进程或重启后可以恢复。无痕标签从不写盘 |
-| 标签自动归档 | 已实现 | 默认 1 天未使用即归档（可设 12 小时/1 天/7 天/30 天/从不）；在应用启动和回到前台时检查；已归档的标签可一键恢复（含历史栈） |
-| 无痕会话 | 已实现 | 使用 GeckoView 私密模式（`usePrivateMode`）：不记录历史、不写标签文件、不显示在下载列表。Cookie 和网站数据的清除**依赖 Gecko 自身的私密浏览机制**（最后一个私密会话关闭时清除），需真机验证 |
-| Google 登录 | 已实现，**不保证** | 见下文“关于 Google 登录” |
-| 广告/跟踪屏蔽 | 已实现 | 见下文“广告与跟踪屏蔽” |
-| 文件下载 | 已实现 | 下载前确认；前台服务保证切到后台时不中断；保存到系统“下载”目录（Android 10+ 用 MediaStore，8/9 需要存储权限）；进度通知、取消、完成后点按打开；下载列表 |
-| 文件上传 | 已实现 | 系统文件选择器（单选/多选，按网页的 accept 过滤）；图片可选“拍照”；网页指定 `capture` 时直接打开相机 |
-| 网页对话框 | 已实现 | alert/confirm/prompt、`<select>`（含多选和分组）、日期/时间/日期时间/月份、颜色、HTTP 认证、弹窗拦截确认、离开页面确认、重新提交表单确认、`navigator.share` |
-| 网站权限 | 已实现 | 定位、摄像头/麦克风、DRM、第三方 Cookie 访问（Storage Access）、局域网访问，**每次都弹窗征得同意**；系统权限只在同意后才申请。有声自动播放默认阻止 |
-| 返回手势 | 已实现 | 支持预测性返回（Android 13+）。顺序：退出全屏 → 关闭菜单/查找/搜索层/二级页面 → 网页后退 → 由其它 App 打开的标签：关闭并回到那个 App → 由网页打开的子标签：关闭并回到父标签 → 回到主页 → 系统处理（回桌面） |
-| 默认浏览器 | 已实现 | 声明 http/https 浏览入口和 `APP_BROWSER` 类别；Android 10+ 通过系统角色对话框申请，失败时跳到系统“默认应用”设置；设置页显示当前是否为默认浏览器 |
-| 外部链接 | 已实现 | `tel:`、`mailto:`、`intent://`、各类 App 协议都先弹窗确认；`intent://` 会清除组件名和 URI 授权标志，只能打开可浏览的 Activity；目标 App 未安装时使用 `browser_fallback_url`（仅限 http/https） |
-| 其它入口 | 已实现 | 其它 App 的“分享”文字/链接、系统文字选择菜单（PROCESS_TEXT）、WEB_SEARCH |
-| 页面菜单 | 已实现 | 前进、刷新/停止、分享、复制链接、页内查找、桌面版网站、对此网站关闭跟踪保护、新建（无痕）标签、关闭标签 |
-| 历史记录 | 已实现 | 搜索、单条删除、清空；为已访问链接着色 |
-| 清除浏览数据 | 已实现 | 历史、Cookie 与网站数据、缓存、下载列表、已归档标签 |
-| 加载错误页 | 已实现 | 中文错误页；**证书/安全错误只提示，不提供“继续访问”**，不绕过 TLS 校验 |
-| 深色模式 | 已实现 | 跟随系统，网页的 `prefers-color-scheme` 也跟随系统 |
-| 仅 HTTPS 模式 | 已实现 | 设置中可开启，默认关闭 |
-| 应用内更新 | 已实现，**未真机验证** | 只读取本仓库 GitHub 正式版 Release；自动下载、通知；安装前校验哈希、包名、versionCode 和签名；安装由系统确认。见下文“应用内更新” |
+| 搜索 / 地址输入 | 已实现 | 默认 Google，可选 Bing、DuckDuckGo、百度；历史匹配加搜索引擎联想（可关闭，无痕不联想） |
+| 多标签与会话恢复 | 已实现 | 每个标签一个 WebView；后台只保留最近 4 个普通标签的 WebView，其余保存前进/后退历史后释放（`WebView.saveState`）；杀进程后可恢复 |
+| 标签自动归档 | 已实现 | 默认 1 天，可调 |
+| 无痕标签 | 已实现，**有条件** | 见下文“无痕模式” |
+| Google 登录 | **受限**，见下文 | 不伪装身份，打开 Google 登录页前提示限制 |
+| 广告 / 跟踪屏蔽 | 已实现（规则子集） | 见下文 |
+| 文件下载 | 已实现 | 下载前确认。http(s) 文件由下载服务带上原标签的 Cookie 重新请求；`data:` 直接保存；`blob:` 由页面读出后保存（上限 40 MB）；前台服务、进度通知、下载列表 |
+| 文件上传 | 已实现 | 系统文件选择器，按 accept 过滤；图片可选拍照 |
+| 网页对话框 | 已实现 | alert / confirm / prompt / 离开页面确认 / HTTP 认证；`<select>` 与日期选择由 WebView 自己处理 |
+| 网站权限 | 已实现 | 摄像头、麦克风、DRM、定位每次询问，不记住选择；网页推送通知不支持 |
+| 全屏视频 | 已实现 | `onShowCustomView`，返回手势退出 |
+| 弹出窗口 | 已实现 | 只有用户点击触发的新窗口才打开为子标签，其余拦截 |
+| 外部链接 | 已实现 | `tel:`、`intent://` 等先确认；`intent://` 清除组件与授权标志 |
+| 证书错误 | **不放行** | 一律取消并显示本地错误页，没有“继续访问” |
+| 安全浏览 | 已实现 | 开启 WebView Safe Browsing，命中时返回安全页面 |
+| 仅 HTTPS | 已实现（近似） | 主文档 http 导航自动改为 https；子资源禁止混合内容 |
+| 第三方 Cookie | 默认关闭 | 可在“全局网站设置”中开启（部分嵌入式登录需要） |
+| 文字缩放 / 桌面版网站 / 页内查找 | 已实现 | 桌面版只把 UA 中的设备描述改为桌面平台，保留 WebView 标识 |
+| 默认浏览器、应用内更新 | 已实现 | 应用内更新只对正式版生效，测试版跳过 |
 
 ### 明确不包含
 
-AI 搜索/总结、账号与云同步、密码管理器（请使用系统自动填充或第三方密码管理器）、uBlock Origin 以外的扩展、网页推送通知（网站请求会被拒绝）、XR、文件夹上传、下载断点续传（进程被杀后未完成的下载标记为失败）、阅读模式、书签、上架应用商店、静默安装更新（更新安装始终需要你在系统对话框中确认）。
+AI 搜索与总结、翻译、账号与云同步、密码管理器（可用系统自动填充）、扩展、网页推送通知、拦截 Cookie 横幅、静默安装更新。
 
 ## 关于 Google 登录
 
-- GeckoView 是 Firefox for Android 使用的同一个内核。本应用**不修改 User-Agent**，GeckoView 160 的应用 UA 名称常量是 `Firefox`（release 通道），所以网站看到的是标准的 Firefox for Android 浏览器，而不是“内嵌 WebView”。Google 拦截内嵌 WebView 登录（`disallowed_useragent`）的规则针对的是 Android WebView，理论上不适用于这里。
-- 网站上的“用 Google 登录”弹窗（`window.open`）会作为子标签打开，登录完成后由网页自行关闭，并回到原标签。
-- 第三方 Cookie 采用 Firefox 默认的“全面 Cookie 保护”（按站点隔离）。少数登录嵌入页会通过 Storage Access 请求 Cookie 权限，此时会弹窗询问，选“允许”即可。
-- **不保证所有 Google 登录都能成功**。Google 可能根据风控、设备、网络环境或其它信号拒绝登录或要求额外验证。通行密钥（Passkey）和 Google 账号的“手机提示”取决于 GeckoView 对 WebAuthn 的支持和设备上的 Google Play 服务，未经验证。开启“严格跟踪保护”可能影响部分登录流程，遇到问题时可在页面菜单中对该网站关闭跟踪保护，或改回标准模式。
+- Google 的 OAuth 2.0 政策规定，开发者**不得**把 Google OAuth 授权请求发往自己控制的“内嵌用户代理”（https://developers.google.com/identity/protocols/oauth2/policies）。系统 WebView 属于此类，所以 **Google 可能拒绝在银耳浏览器中登录**（常见报错为 `disallowed_useragent`），第三方网站的“用 Google 登录”也可能失败。
+- 银耳浏览器**不伪装身份**：保留 WebView 默认 User-Agent（含 `; wv` 标识）和 `X-Requested-With` 请求头，不尝试绕过 Google 的检测。
+- 打开 Google 登录页前，会弹窗说明限制，可选择“继续尝试”或“用其它浏览器打开”。改用其它浏览器登录后，**登录状态不会带回银耳浏览器**。
+- 不在 Google 登录页上执行广告拦截以外的任何改动；过滤规则不拦截 accounts.google.com 主文档（有单元测试保证）。
+- 是否能登录，以真机实测为准；本轮没有真机。
 
 ## 广告与跟踪屏蔽
 
-两层同时生效：
+uBlock Origin 是浏览器扩展，系统 WebView 不支持扩展，所以已经**移除**（包括随包的 .xpi 和全部入口）。现在的做法是：
 
-1. **Gecko 增强型跟踪保护（ETP）**：默认“标准”，拦截已知的广告、分析、社交、加密货币挖矿和指纹跟踪器（使用 Firefox 内置列表）。第三方 Cookie 按站点隔离，并自动清理跟踪 Cookie。可在设置中切到“严格”，也可在页面菜单中对单个网站关闭。
-2. **uBlock Origin 1.76.0**：随 APK 打包的 `.xpi` 下载自 addons.mozilla.org（SHA256 `6f20ff6749193599548770539103069c20948dfcd3e61c3089a67da7bfc3be39`，与 AMO 公布的值一致），首次启动时通过 `WebExtensionController.install()` 从本地文件安装，并允许在无痕标签中运行。
-   - 过滤规则列表由 uBlock Origin 自己联网更新
-   - “设置 → uBlock Origin 设置”打开它的原版控制面板，可以管理过滤规则列表、信任站点（白名单）和自定义规则
-   - “设置 → 检查 uBlock Origin 更新”通过 AMO 更新扩展本体
-   - 应用只接受这一个扩展；网页触发的其它扩展安装请求一律拒绝
+1. **网络拦截**：在 `WebViewClient.shouldInterceptRequest`（以及 Service Worker 的请求拦截接口）中，用随包的 EasyList（广告）和 EasyPrivacy（跟踪器）规则判断子资源请求，命中时返回空响应。主文档（你打开的网页本身）不会被拦截。
+2. **元素隐藏**：按 EasyList 的 `##` 规则生成 CSS。新版 WebView 在页面开始解析时注入（广告位不会先出现再消失）；旧版 WebView 退化为页面加载完成后注入。
 
-本版没有实现 uBlock Origin 的工具栏弹窗（按网站一键关闭）。要让某个网站不被 uBO 屏蔽，请在它的控制面板“信任站点”中添加。
+规则快照：EasyList 与 EasyPrivacy，2026-11-14。作者为 The EasyList authors（https://easylist.to/），GPL-3.0 / CC BY-SA 3.0 双许可，文件未修改。实际加载后：
+
+| 指标 | 数量 |
+|---|---|
+| 规则总数（不含注释） | 134,478 |
+| 能执行的网络规则 | 100,051 |
+| 能执行的元素隐藏规则 | 24,120 |
+| 跳过的规则 | 10,307 |
+
+**支持的写法**：
+- `||域名^`；
+- `$third-party`；
+- 资源类型选项。WebView 不提供资源类型，按 `Accept` 请求头近似推断为图片 / 样式表 / 子框架 / 其它；
+- `||域名/路径`；
+- 例外 `@@||…`，保留路径和 `domain=` 的作用范围；
+- 通用和按站点的 `##`，以及 `#@#` 例外。
+
+**跳过的写法**（宁可漏拦，也不误拦）：
+- 通配符和正则；
+- 带 `domain=` 或 `~` 否定的拦截规则；
+- `$popup`、`$important` 等其它选项；
+- 过程式选择器（`:has-text` 等）、脚本注入（`+js`）、`$removeparam`。
+
+**限制**：
+- 无法拦截 WebSocket；无法修改网页脚本；
+- Service Worker 的请求拿不到所属网页，按“第三方”处理，也不适用单站点放行；
+- “第三方”的判断用近似的可注册域名，没有使用完整的公共后缀列表；
+- 拦截计数只统计网络请求。
+
+**设置**：
+- “全局网站设置”中可以分别开关广告和跟踪器拦截，并从 easylist.to（固定的 HTTPS 地址）手动更新规则；
+- 页面菜单 → “网站设置”可以对单个网站关闭拦截。
+
+## 无痕模式
+
+- 无痕标签使用独立的 **WebView Profile**（`androidx.webkit` 的 `MULTI_PROFILE`）。它与普通标签分开保存 Cookie、网站存储、HTTP 缓存和定位权限，彼此不可见。
+- 每次无痕会话都使用一个**新的 Profile 名**。关闭最后一个无痕标签时：
+  - 立即清空该 Profile 的 Cookie、网站存储和定位权限；
+  - 官方文档说明，同一进程中加载过的 Profile 不能删除，所以它在磁盘上的目录（含 HTTP 缓存）会在**下次启动应用时**整体删除。
+- 无痕标签不记录历史，不写入标签文件，下载不进入下载列表（文件本身仍会保存到“下载”目录）。
+- **系统 WebView 不支持 `MULTI_PROFILE` 时，应用拒绝打开无痕标签**，并提示更新 WebView，不会让无痕标签与普通标签共享 Cookie。
+- 以上隔离与清理效果**未在真机上验证**。
+
+## 从 0.2.0（GeckoView）升级
+
+| 数据 | 能否保留 |
+|---|---|
+| 标签的网址和标题、历史记录、下载列表、设置、已归档标签、固定的网站 | 保留（银耳浏览器自己的文件和数据库，格式不变） |
+| 标签的前进/后退历史 | **不能**保留：GeckoView 的格式与 WebView 不通用，只按网址重新打开 |
+| Cookie、登录状态、网站存储、网站权限 | **不能**迁移：两种内核的存储格式不同，需要**重新登录各网站** |
+| uBlock Origin 的自定义规则和信任站点 | 不能迁移（扩展已移除）；单站点放行需在“网站设置”中重新设置 |
+| 旧内核的数据目录 | **不会自动删除**。首次启动会弹窗说明；可在“设置 → 存储 → 清理旧内核数据”中手动清理 |
+
+当前的测试版包名不同（`.debug`），不会读取正式版的数据。上表描述的是将来以同一包名发布 WebView 正式版时的行为。
 
 ## 隐私
 
-- 应用代码本身没有任何统计、遥测或崩溃上报，也没有接入 Glean/Firebase 等 SDK。
-- 会联网的功能：你访问的网站；搜索联想（发送给所选搜索引擎，可关闭）；Gecko 的安全浏览列表更新（Mozilla 代理的 Safe Browsing 服务）；uBlock Origin 的过滤规则更新；手动检查扩展更新（AMO）；检查应用更新（只请求 `api.github.com` 上本仓库的公开 Release 信息，不带任何 token 或个人信息，可在设置中关闭）。
-- 应用数据不参与 Android 云备份或设备迁移（`allowBackup=false` + `dataExtractionRules` 全部排除）。
+- 应用代码本身没有统计、遥测或崩溃上报。
+- 会联网的功能：
+  - 你访问的网站；
+  - 搜索联想（可关闭）；
+  - WebView 安全浏览（Google Safe Browsing，由系统 WebView 执行）；
+  - 手动更新过滤规则（easylist.to）；
+  - 检查应用更新（api.github.com，可关闭）。
+- 应用数据不参与 Android 云备份或设备迁移。
 
 ## 应用内更新
 
@@ -120,7 +170,7 @@ AI 搜索/总结、账号与云同步、密码管理器（请使用系统自动�
 | 启动时检查更新 | 开 | 打开应用时检查；距上次检查不足 12 小时则跳过，不会真正请求 GitHub |
 | 定期检查更新 | 开 | WorkManager 约每天一次，在联网时后台检查（同样受 12 小时限频） |
 | 自动下载新版本 | 开 | 发现新版本后自动下载，完成后发通知 |
-| 仅在 Wi-Fi 下自动下载 | 开 | 安装包约 200 MB。手动点“下载”或“用移动数据下载”不受此限制 |
+| 仅在 Wi-Fi 下自动下载 | 开 | 手动点“下载”或“用移动数据下载”不受此限制 |
 
 手动“检查更新”两次之间至少间隔 1 分钟。GitHub 未认证 API 每个 IP 每小时限 60 次；被限流时，应用会显示解除时间，并在此之前不再请求。另外使用 ETag 条件请求，Release 没有变化时 GitHub 返回 304，不消耗额度。
 
@@ -198,7 +248,7 @@ export ANDROID_HOME=/path/to/android-sdk     # 或在 local.properties 中写 sd
 # 产物：app/build/outputs/apk/debug/app-debug.apk
 ```
 
-依赖从 Google Maven、Maven Central 和 `https://maven.mozilla.org/maven2/`（仅 GeckoView）下载。Gradle 内存上限为 1.5 GB（见 `gradle.properties`）。
+依赖从 Google Maven 和 Maven Central 下载。Gradle 内存上限为 1.5 GB（见 `gradle.properties`）。
 
 ### 签名
 
@@ -209,18 +259,20 @@ export ANDROID_HOME=/path/to/android-sdk     # 或在 local.properties 中写 sd
   - 加上 `-Pyiner.requireReleaseSigning=true`（发布工作流使用）：直接失败。
 - 正式发布请走上面的 GitHub Actions 流程，不要把本地构建的包当作正式版分发。
 
-### 升级 GeckoView
+### 内核与规则的安全更新
 
-GeckoView 的安全更新只能靠重新构建获得。修改 `app/build.gradle.kts` 中的 `geckoviewVersion`（版本号见 `https://maven.mozilla.org/maven2/org/mozilla/geckoview/geckoview-arm64-v8a/maven-metadata.xml`），再重新构建即可。新版本可能提高 compileSdk 要求或调整 API，届时需要按编译错误修改代码。**建议至少每 1–2 个月更新一次。**
+- 网页内核是系统组件 Android System WebView，由 Google Play / 系统更新，不需要重新构建本应用；
+- 过滤规则可以在应用内手动更新；随包的规则快照在每次发布前更新即可。
 
 ## 代码结构
 
 ```
 app/src/main/java/io/yiner/browser/
-├── YinerApp.kt            Application：GeckoRuntime、数据库、设置（全部懒加载，GeckoView 子进程中不初始化）
+├── YinerApp.kt            Application：数据库、设置、规则引擎、无痕配置（全部懒加载）
 ├── MainActivity.kt        外部 Intent、系统权限、文件选择/拍照、外链确认、下载确认、默认浏览器
 ├── core/                  纯 Kotlin 逻辑（有单元测试）：输入解析、外链策略、返回策略、归档策略、下载文件名、更新校验
-├── browser/               TabManager（标签与 GeckoSession）、网页对话框、权限、uBlock Origin 安装与 ETP 设置、错误页
+├── browser/               TabManager（标签与 WebView）、无痕 Profile、会话保存、网页对话框、Google 登录提示、blob 下载、错误页
+├── blocking/              广告与跟踪拦截：规则引擎 FilterEngine（有单元测试）、ContentBlocker、元素隐藏注入
 ├── data/                  SQLite（历史/归档/下载）、设置、搜索联想
 ├── download/              下载调度与前台服务
 ├── update/                应用内更新：GitHub API、可信下载、WorkManager 任务、PackageInstaller 安装、通知
@@ -232,8 +284,8 @@ scripts/make_update_metadata.py   发布时生成 yiner-update.json 与 SHA256SU
 
 ## 第三方许可
 
-- GeckoView — Mozilla Public License 2.0
-- uBlock Origin — GPL-3.0，源码 https://github.com/gorhill/uBlock 。本应用原样内置 AMO 发布的签名包，未做修改
-- AndroidX、Jetpack Compose、Kotlin、kotlinx.coroutines — Apache License 2.0
+- 网页内核：设备上的 Android System WebView（基于 Chromium），不随本应用分发
+- EasyList / EasyPrivacy 过滤规则 — The EasyList authors（https://easylist.to/），GPL-3.0 / CC BY-SA 3.0 双许可，原样内置于 `app/src/main/assets/filters/`
+- AndroidX（含 androidx.webkit）、Jetpack Compose、Kotlin、kotlinx.coroutines — Apache License 2.0
 
-本项目仅供个人使用，不分发、不上架。
+本项目仅供个人使用。

@@ -1,10 +1,41 @@
 package io.yiner.browser.browser
 
+import android.annotation.SuppressLint
 import android.content.Context
+import android.content.MutableContextWrapper
+import android.graphics.Bitmap
+import android.net.Uri
+import android.net.http.SslError
+import android.os.Message
 import android.util.AtomicFile
 import android.util.Log
+import android.view.View
+import android.webkit.CookieManager
+import android.webkit.GeolocationPermissions
+import android.webkit.HttpAuthHandler
+import android.webkit.JsPromptResult
+import android.webkit.JsResult
+import android.webkit.PermissionRequest
+import android.webkit.RenderProcessGoneDetail
+import android.webkit.SslErrorHandler
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
+import android.webkit.WebView
+import androidx.webkit.SafeBrowsingResponseCompat
+import androidx.core.net.toUri
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewClientCompat
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
+import io.yiner.browser.blocking.ContentBlocker
+import io.yiner.browser.blocking.Cosmetics
 import io.yiner.browser.core.ArchiveCandidate
 import io.yiner.browser.core.ArchivePolicy
+import io.yiner.browser.core.LinkDecision
+import io.yiner.browser.core.LinkPolicy
 import io.yiner.browser.data.ArchivedTab
 import io.yiner.browser.data.BrowserDb
 import io.yiner.browser.data.Prefs
@@ -19,33 +50,24 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import org.mozilla.geckoview.AllowOrDeny
-import org.mozilla.geckoview.ContentBlocking
-import org.mozilla.geckoview.GeckoResult
-import org.mozilla.geckoview.GeckoRuntime
-import org.mozilla.geckoview.GeckoSession
-import org.mozilla.geckoview.GeckoSession.HistoryDelegate
-import org.mozilla.geckoview.GeckoSession.NavigationDelegate
-import org.mozilla.geckoview.GeckoSession.PermissionDelegate.ContentPermission
-import org.mozilla.geckoview.GeckoSessionSettings
-import org.mozilla.geckoview.WebRequestError
-import org.mozilla.geckoview.WebResponse
 import java.io.File
 import java.util.UUID
-import io.yiner.browser.core.LinkDecision
-import io.yiner.browser.core.LinkPolicy
 
 /**
- * 管理全部标签及其 GeckoSession。所有方法都在主线程调用（GeckoView 的委托也在主线程回调）。
+ * 管理全部标签及其 WebView（Android 系统 WebView，基于 Chromium）。所有方法都在主线程调用。
+ *
+ * - 每个标签一个 WebView；后台只保留最近使用的若干个普通标签的 WebView，其余保存历史后销毁；
+ * - 无痕标签使用独立 WebView Profile（见 [PrivateProfiles]），系统不支持时拒绝打开无痕标签；
+ * - 网络请求在 shouldInterceptRequest 中按规则拦截（见 [ContentBlocker]）。
  */
 class TabManager(
     private val context: Context,
-    private val runtimeProvider: () -> GeckoRuntime,
     private val db: BrowserDb,
     private val prefs: Prefs,
     private val scope: CoroutineScope,
-    private val prompts: PromptHandler,
-    private val permissions: PermissionHandler,
+    private val blocker: ContentBlocker,
+    val privateProfiles: PrivateProfiles,
+    private val dialogs: WebDialogs,
 ) {
     private val _tabs = MutableStateFlow<List<Tab>>(emptyList())
     val tabs: StateFlow<List<Tab>> = _tabs.asStateFlow()
@@ -53,7 +75,7 @@ class TabManager(
     private val _selectedId = MutableStateFlow<String?>(null)
     val selectedId: StateFlow<String?> = _selectedId.asStateFlow()
 
-    /** 选中标签的会话被替换（例如内容进程崩溃后重建）时递增，界面据此重新挂载 GeckoView。 */
+    /** 选中标签的 WebView 被替换（例如渲染进程崩溃后重建）时递增，界面据此重新挂载。 */
     private val _sessionEpoch = MutableStateFlow(0)
     val sessionEpoch: StateFlow<Int> = _sessionEpoch.asStateFlow()
 
@@ -74,20 +96,30 @@ class TabManager(
     private var saveJob: Job? = null
     private var restored = false
 
+    /** 所有 WebView 共用的上下文包装：有 Activity 时指向 Activity（下拉框等弹窗需要），否则指向 Application。 */
+    private val contexts = mutableListOf<MutableContextWrapper>()
+    private var activityContext: Context? = null
+
     val selectedTab: Tab? get() = _tabs.value.firstOrNull { it.id == _selectedId.value }
 
     fun find(id: String?): Tab? = _tabs.value.firstOrNull { it.id == id }
 
+    val privateSupported: Boolean get() = privateProfiles.supported
+
+    fun attachActivity(activity: Context?) {
+        activityContext = activity
+        contexts.forEach { it.baseContext = activity ?: context }
+    }
+
     // ------------------------------------------------------------------ 恢复与保存
 
-    /** 从磁盘恢复上次的普通标签（只建模型，不创建会话，选中时再懒加载）。 */
+    /** 从磁盘恢复上次的普通标签（只建模型，不创建 WebView，选中时再懒加载）。 */
     fun restore() {
         if (restored) return
         restored = true
         val json = runCatching { String(stateFile.readFully(), Charsets.UTF_8) }.getOrNull() ?: return
         runCatching {
-            val root = JSONObject(json)
-            val arr = root.getJSONArray("tabs")
+            val arr = JSONObject(json).getJSONArray("tabs")
             val list = (0 until arr.length()).map { i ->
                 val o = arr.getJSONObject(i)
                 Tab(
@@ -98,6 +130,7 @@ class TabManager(
                     url = o.optString("url"),
                     title = o.optString("title"),
                     desktopMode = o.optBoolean("desktop"),
+                    // 旧版 GeckoView 保存的历史格式不兼容：SessionCodec 会识别并改为按 URL 打开
                     sessionState = o.optString("state").ifEmpty { null },
                     lastActiveAt = o.optLong("lastActive", System.currentTimeMillis()),
                 )
@@ -111,13 +144,14 @@ class TabManager(
     private fun scheduleSave() {
         saveJob?.cancel()
         saveJob = scope.launch {
-            delay(600)
+            delay(800)
             saveNow()
         }
     }
 
     /** 立即保存（Activity 进入后台时调用）。无痕标签永不落盘。 */
     fun saveNow() {
+        _tabs.value.filter { !it.isPrivate }.forEach { t -> t.view?.let { v -> SessionCodec.save(v)?.let { t.sessionState = it } } }
         val arr = JSONArray()
         _tabs.value.filter { !it.isPrivate }.forEach { t ->
             arr.put(
@@ -148,27 +182,23 @@ class TabManager(
 
     // ------------------------------------------------------------------ 标签操作
 
+    /** 新建标签。请求无痕但系统 WebView 不支持隔离时返回 null（调用方需提示用户）。 */
     fun newTab(
         url: String?,
         isPrivate: Boolean,
         parentId: String? = null,
         openedByOtherApp: Boolean = false,
         select: Boolean = true,
-    ): Tab {
+    ): Tab? {
+        if (isPrivate && !privateSupported) return null
         val tab = Tab(
             id = UUID.randomUUID().toString(),
-            isPrivate = isPrivate,
-            parentId = parentId,
-            openedByOtherApp = openedByOtherApp,
-            url = url.orEmpty(),
-            title = "",
-            desktopMode = false,
-            sessionState = null,
+            isPrivate = isPrivate, parentId = parentId, openedByOtherApp = openedByOtherApp,
+            url = url.orEmpty(), title = "", desktopMode = false, sessionState = null,
             lastActiveAt = System.currentTimeMillis(),
         )
         _tabs.value = _tabs.value + tab
-        // ensureSession 会按 tab.url 加载
-        if (!url.isNullOrBlank()) ensureSession(tab)
+        if (!url.isNullOrBlank()) ensureView(tab)
         if (select) select(tab.id)
         scheduleSave()
         return tab
@@ -177,41 +207,42 @@ class TabManager(
     fun select(id: String?) {
         val prev = selectedTab
         val tab = find(id)
-        if (prev != null && prev !== tab) prev.session?.setActive(false)
+        if (prev != null && prev !== tab) prev.view?.onPause()
         _selectedId.value = tab?.id
         if (tab != null) {
             tab.lastActiveAt = System.currentTimeMillis()
-            ensureSession(tab).setActive(true)
-            trimSessions()
+            ensureView(tab).onResume()
+            trimViews()
         }
         scheduleSave()
     }
 
-    /** 在当前标签加载；没有标签时新建。 */
-    fun load(url: String, isPrivate: Boolean = false) {
+    /** 在当前标签加载；没有标签（或无痕属性不同）时新建。 */
+    fun load(url: String, isPrivate: Boolean = false): Boolean {
         val tab = selectedTab
-        if (tab == null || tab.isPrivate != isPrivate) {
-            newTab(url, isPrivate)
+        return if (tab == null || tab.isPrivate != isPrivate) {
+            newTab(url, isPrivate) != null
         } else {
             tab.update { it.copy(url = url) }
-            ensureSession(tab).loadUri(url)
+            ensureView(tab).loadUrl(url)
             tab.lastActiveAt = System.currentTimeMillis()
+            true
         }
     }
 
     fun close(id: String) {
         val tab = find(id) ?: return
         val remaining = _tabs.value.filter { it.id != id }
-        // 子标签的父级指向被关闭标签的父级，保持返回链
         remaining.forEach { if (it.parentId == id) it.parentId = tab.parentId }
         _tabs.value = remaining
-        tab.session?.close()
-        tab.session = null
+        destroyView(tab)
         if (_selectedId.value == id) {
             val parent = remaining.firstOrNull { it.id == tab.parentId && it.isPrivate == tab.isPrivate }
             _selectedId.value = null
             if (parent != null) select(parent.id)
         }
+        // 最后一个无痕标签关闭：清空无痕 Profile 的 Cookie 与网站存储，下次无痕会话换新 Profile
+        if (tab.isPrivate && remaining.none { it.isPrivate }) privateProfiles.endSession()
         scheduleSave()
     }
 
@@ -221,24 +252,24 @@ class TabManager(
 
     fun setDesktopMode(tab: Tab, enabled: Boolean) {
         tab.update { it.copy(desktopMode = enabled) }
-        tab.session?.settings?.apply {
-            userAgentMode = if (enabled) GeckoSessionSettings.USER_AGENT_MODE_DESKTOP else GeckoSessionSettings.USER_AGENT_MODE_MOBILE
-            viewportMode = if (enabled) GeckoSessionSettings.VIEWPORT_MODE_DESKTOP else GeckoSessionSettings.VIEWPORT_MODE_MOBILE
-        }
-        tab.session?.reload()
+        tab.view?.let { applyUserAgent(it, enabled); it.reload() }
         scheduleSave()
     }
 
-    /** 将当前站点加入/移出 Gecko 增强型跟踪保护例外。 */
-    fun setTrackingExempt(tab: Tab, exempt: Boolean): Boolean {
-        val perm = tab.trackingPermission ?: return false
-        runtimeProvider().storageController.setPermission(
-            perm,
-            if (exempt) ContentPermission.VALUE_ALLOW else ContentPermission.VALUE_DENY,
-        )
-        tab.update { it.copy(trackingExempt = exempt) }
-        tab.session?.reload()
-        return true
+    /** 对当前网站开关拦截（按近似可注册域名记录），并刷新页面。 */
+    fun setSiteBlocking(tab: Tab, enabled: Boolean) {
+        val host = tab.pageHost ?: return
+        prefs.setSiteBlocking(io.yiner.browser.blocking.FilterEngine.baseDomain(host), enabled)
+        tab.update { it.copy(siteBlockingEnabled = enabled) }
+        tab.view?.reload()
+    }
+
+    fun applyTextZoom(percent: Int) {
+        _tabs.value.forEach { it.view?.settings?.textZoom = percent }
+    }
+
+    fun applyThirdPartyCookies(allow: Boolean) {
+        _tabs.value.forEach { t -> t.view?.let { privateProfiles.cookieManagerFor(it).setAcceptThirdPartyCookies(it, allow) } }
     }
 
     // ------------------------------------------------------------------ 归档
@@ -251,6 +282,7 @@ class TabManager(
         ).toSet()
         if (ids.isEmpty()) return
         val toArchive = _tabs.value.filter { it.id in ids && it.url.isNotBlank() }
+        toArchive.forEach { t -> t.view?.let { v -> SessionCodec.save(v)?.let { t.sessionState = it } } }
         val records = toArchive.map { ArchivedTab(it.id, it.url, it.displayTitle, it.sessionState, now) }
         scope.launch(Dispatchers.IO) {
             db.archive(records)
@@ -274,240 +306,294 @@ class TabManager(
         }
     }
 
-    // ------------------------------------------------------------------ 会话
+    // ------------------------------------------------------------------ WebView
 
-    /** 保证标签有会话；没有时新建并从保存的状态或 URL 恢复。 */
-    fun ensureSession(tab: Tab): GeckoSession {
-        tab.session?.let { return it }
-        val session = buildSession(tab)
-        tab.session = session
-        session.open(runtimeProvider())
-        val saved = tab.sessionState?.let { runCatching { GeckoSession.SessionState.fromString(it) }.getOrNull() }
-        when {
-            saved != null -> session.restoreState(saved)
-            tab.url.isNotBlank() -> session.loadUri(tab.url)
-        }
-        return session
+    /** 保证标签有 WebView；没有时新建并从保存的历史或 URL 恢复。 */
+    fun ensureView(tab: Tab): WebView {
+        tab.view?.let { return it }
+        val view = buildView(tab)
+        tab.view = view
+        if (!SessionCodec.restore(view, tab.sessionState) && tab.url.isNotBlank()) view.loadUrl(tab.url)
+        return view
     }
 
-    /** 只保留最近使用的若干个普通标签会话，其余释放以节省内存（无痕标签不释放，否则会丢失登录状态）。 */
-    private fun trimSessions() {
-        val live = _tabs.value.filter { it.session != null && !it.isPrivate && it.id != _selectedId.value }
+    private fun destroyView(tab: Tab) {
+        val v = tab.view ?: return
+        tab.view = null
+        (v.parent as? android.view.ViewGroup)?.removeView(v)
+        contexts.remove(v.context as? MutableContextWrapper)
+        v.stopLoading()
+        v.destroy()
+    }
+
+    /** 只保留最近使用的若干个普通标签的 WebView（无痕标签不释放，否则会丢失其页面状态）。 */
+    private fun trimViews() {
+        _tabs.value.filter { it.view != null && !it.isPrivate && it.id != _selectedId.value }
             .sortedByDescending { it.lastActiveAt }
-        live.drop(MAX_BACKGROUND_SESSIONS).forEach { t ->
-            t.session?.close()
-            t.session = null
+            .drop(MAX_BACKGROUND_VIEWS)
+            .forEach { t ->
+                t.view?.let { v -> SessionCodec.save(v)?.let { t.sessionState = it } }
+                destroyView(t)
+            }
+    }
+
+    private var serviceWorkerHooked = false
+
+    /**
+     * Service Worker 发出的请求不经过 WebViewClient，需单独拦截。此时拿不到所属网页，
+     * 因此按“第三方”处理、且不适用单站点放行名单。
+     */
+    private fun hookServiceWorkers() {
+        if (serviceWorkerHooked) return
+        serviceWorkerHooked = true
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.SERVICE_WORKER_BASIC_USAGE) ||
+            !WebViewFeature.isFeatureSupported(WebViewFeature.SERVICE_WORKER_SHOULD_INTERCEPT_REQUEST)
+        ) {
+            return
         }
+        androidx.webkit.ServiceWorkerControllerCompat.getInstance().setServiceWorkerClient(object : androidx.webkit.ServiceWorkerClientCompat() {
+            override fun shouldInterceptRequest(request: WebResourceRequest): WebResourceResponse? = interceptServiceWorker(request)
+        })
     }
 
-    private fun buildSession(tab: Tab): GeckoSession {
-        val desktop = tab.state.value.desktopMode
-        val settings = GeckoSessionSettings.Builder()
-            .usePrivateMode(tab.isPrivate)
-            .useTrackingProtection(true)
-            .userAgentMode(if (desktop) GeckoSessionSettings.USER_AGENT_MODE_DESKTOP else GeckoSessionSettings.USER_AGENT_MODE_MOBILE)
-            .viewportMode(if (desktop) GeckoSessionSettings.VIEWPORT_MODE_DESKTOP else GeckoSessionSettings.VIEWPORT_MODE_MOBILE)
-            .suspendMediaWhenInactive(false)
-            .build()
-        return GeckoSession(settings).also { attachDelegates(tab, it) }
+    private fun interceptServiceWorker(request: WebResourceRequest): WebResourceResponse? {
+        val accept = request.requestHeaders?.entries?.firstOrNull { it.key.equals("Accept", true) }?.value
+        return if (blocker.shouldBlock(request.url.toString(), null, accept)) blocker.emptyResponse() else null
     }
 
-    private fun attachDelegates(tab: Tab, session: GeckoSession) {
-        session.promptDelegate = prompts
-        session.permissionDelegate = permissions
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun buildView(tab: Tab): WebView {
+        hookServiceWorkers()
+        val ctx = MutableContextWrapper(activityContext ?: context).also { contexts.add(it) }
+        val view = WebView(ctx)
+        // 无痕标签：必须在任何加载之前切换到独立 Profile（其 Service Worker 也单独拦截）
+        if (tab.isPrivate) privateProfiles.apply(view) { interceptServiceWorker(it) }
+        val s = view.settings
+        s.javaScriptEnabled = true
+        s.domStorageEnabled = true
+        s.mediaPlaybackRequiresUserGesture = true
+        s.setSupportMultipleWindows(true)
+        s.javaScriptCanOpenWindowsAutomatically = false
+        s.allowFileAccess = false
+        s.allowContentAccess = false
+        s.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+        s.builtInZoomControls = true
+        s.displayZoomControls = false
+        s.setSupportZoom(true)
+        s.textZoom = prefs.settings.value.textZoomPercent
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.SAFE_BROWSING_ENABLE)) {
+            WebSettingsCompat.setSafeBrowsingEnabled(s, true)
+        }
+        if (tab.isPrivate) s.cacheMode = WebSettings.LOAD_DEFAULT
+        applyUserAgent(view, tab.state.value.desktopMode)
 
-        session.navigationDelegate = object : NavigationDelegate {
-            override fun onLocationChange(
-                session: GeckoSession,
-                url: String?,
-                perms: MutableList<ContentPermission>,
-                hasUserGesture: Boolean,
-            ) {
-                val shown = if (url != null && url.startsWith(ERROR_PAGE_PREFIX)) tab.url else url.orEmpty()
-                val tracking = perms.firstOrNull { it.permission == GeckoSession.PermissionDelegate.PERMISSION_TRACKING }
-                tab.trackingPermission = tracking
-                tab.update {
-                    it.copy(
-                        url = shown,
-                        trackingToggleAvailable = tracking != null,
-                        trackingExempt = tracking?.value == ContentPermission.VALUE_ALLOW,
-                    )
+        val cookies = privateProfiles.cookieManagerFor(view)
+        cookies.setAcceptCookie(true)
+        cookies.setAcceptThirdPartyCookies(view, prefs.settings.value.thirdPartyCookies)
+
+        view.webViewClient = Client(tab)
+        view.webChromeClient = Chrome(tab)
+        view.setDownloadListener { url, userAgent, contentDisposition, mimetype, contentLength ->
+            val host = uiHost ?: return@setDownloadListener
+            host.confirmDownload(
+                tab,
+                DownloadRequest(
+                    url = url, userAgent = userAgent, contentDisposition = contentDisposition, mimeType = mimetype,
+                    contentLength = contentLength, referer = tab.url.takeIf { it.startsWith("http") },
+                    cookies = runCatching { cookies.getCookie(url) }.getOrNull(), isPrivate = tab.isPrivate,
+                ),
+            )
+        }
+        Cosmetics.install(view, blocker)
+        BlobDownloads.install(view)
+        return view
+    }
+
+    /** 桌面版网站：只把设备描述改为桌面平台并去掉 “Mobile”，保留 WebView 标识（“; wv”），不冒充其它浏览器。 */
+    private fun applyUserAgent(view: WebView, desktop: Boolean) {
+        val base = WebSettings.getDefaultUserAgent(view.context)
+        view.settings.userAgentString = if (desktop) {
+            base.replace(Regex("""\(Linux; Android [^)]*?(; wv)?\)""")) { m -> "(X11; Linux x86_64" + (m.groupValues[1]) + ")" }
+                .replace(" Mobile", "")
+        } else {
+            null
+        }
+        view.settings.useWideViewPort = true
+        view.settings.loadWithOverviewMode = desktop
+    }
+
+    private fun refreshNav(tab: Tab, view: WebView) {
+        tab.update { it.copy(canGoBack = view.canGoBack(), canGoForward = view.canGoForward()) }
+    }
+
+    private inner class Client(private val tab: Tab) : WebViewClientCompat() {
+        override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+            if (!request.isForMainFrame) return false
+            val url = request.url.toString()
+            return when (val d = LinkPolicy.decide(url, false)) {
+                LinkDecision.Block -> true
+                is LinkDecision.OpenExternally -> {
+                    uiHost?.confirmExternalLink(tab, d.uri); true
                 }
-                scheduleSave()
-            }
-
-            override fun onCanGoBack(session: GeckoSession, canGoBack: Boolean) {
-                tab.update { it.copy(canGoBack = canGoBack) }
-            }
-
-            override fun onCanGoForward(session: GeckoSession, canGoForward: Boolean) {
-                tab.update { it.copy(canGoForward = canGoForward) }
-            }
-
-            override fun onLoadRequest(
-                session: GeckoSession,
-                request: NavigationDelegate.LoadRequest,
-            ): GeckoResult<AllowOrDeny> = handleLoadRequest(tab, request)
-
-            override fun onSubframeLoadRequest(
-                session: GeckoSession,
-                request: NavigationDelegate.LoadRequest,
-            ): GeckoResult<AllowOrDeny> {
-                // 子框架不允许直接拉起外部 App 或打开本地文件
-                return when (LinkPolicy.decide(request.uri, false)) {
-                    LinkDecision.LoadInBrowser -> GeckoResult.allow()
-                    else -> GeckoResult.deny()
+                LinkDecision.LoadInBrowser -> {
+                    val s = prefs.settings.value
+                    when {
+                        // 仅 HTTPS 模式：把主文档的 http 导航升级为 https
+                        s.httpsOnly && url.startsWith("http://") -> {
+                            view.loadUrl("https://" + url.removePrefix("http://")); true
+                        }
+                        GoogleSignIn.isSignInUrl(url) && !prefs.googleSignInNoticeShown && uiHost != null &&
+                            !request.isRedirect -> {
+                            uiHost?.confirmGoogleSignIn(tab, url); true
+                        }
+                        else -> false
+                    }
                 }
             }
+        }
 
-            override fun onNewSession(session: GeckoSession, uri: String): GeckoResult<GeckoSession> {
-                // target=_blank / window.open：开新标签，GeckoView 会自行 open 返回的会话
-                val child = Tab(
-                    id = UUID.randomUUID().toString(),
-                    isPrivate = tab.isPrivate, parentId = tab.id, openedByOtherApp = false,
-                    url = uri, title = "", desktopMode = tab.state.value.desktopMode,
-                    sessionState = null, lastActiveAt = System.currentTimeMillis(),
+        override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+            val host = url.toUri().host
+            tab.pageHost = host
+            tab.update {
+                it.copy(
+                    url = url, loading = true, progress = 5, blockedCount = 0, secure = url.startsWith("https://"),
+                    siteBlockingEnabled = blocker.isSiteEnabled(host),
                 )
-                val childSession = buildSession(child)
-                child.session = childSession
-                _tabs.value = _tabs.value + child
-                tab.session?.setActive(false)
-                _selectedId.value = child.id
-                onTabOpenedByPage?.invoke(child)
-                scheduleSave()
-                return GeckoResult.fromValue(childSession)
             }
-
-            override fun onLoadError(
-                session: GeckoSession,
-                uri: String?,
-                error: WebRequestError,
-            ): GeckoResult<String> {
-                if (uri != null) tab.update { it.copy(url = uri) }
-                return GeckoResult.fromValue(ErrorPages.dataUri(uri, error))
-            }
+            refreshNav(tab, view)
         }
 
-        session.progressDelegate = object : GeckoSession.ProgressDelegate {
-            override fun onPageStart(session: GeckoSession, url: String) {
-                tab.update { it.copy(loading = true, progress = 5, blockedCount = 0) }
-            }
-
-            override fun onPageStop(session: GeckoSession, success: Boolean) {
-                tab.update { it.copy(loading = false, progress = 100) }
-            }
-
-            override fun onProgressChange(session: GeckoSession, progress: Int) {
-                tab.update { it.copy(progress = progress) }
-            }
-
-            override fun onSecurityChange(
-                session: GeckoSession,
-                securityInfo: GeckoSession.ProgressDelegate.SecurityInformation,
-            ) {
-                tab.update { it.copy(secure = securityInfo.isSecure) }
-            }
-
-            override fun onSessionStateChange(session: GeckoSession, sessionState: GeckoSession.SessionState) {
-                if (!tab.isPrivate) {
-                    tab.sessionState = sessionState.toString()
-                    scheduleSave()
-                }
-            }
+        override fun onPageFinished(view: WebView, url: String) {
+            tab.update { it.copy(loading = false, progress = 100) }
+            refreshNav(tab, view)
+            Cosmetics.fallbackInject(view, blocker, tab.pageHost)
+            scheduleSave()
         }
 
-        session.contentBlockingDelegate = object : ContentBlocking.Delegate {
-            override fun onContentBlocked(session: GeckoSession, event: ContentBlocking.BlockEvent) {
-                tab.update { it.copy(blockedCount = it.blockedCount + 1) }
-            }
-        }
-
-        session.contentDelegate = object : GeckoSession.ContentDelegate {
-            override fun onTitleChange(session: GeckoSession, title: String?) {
-                val t = title.orEmpty()
-                tab.update { it.copy(title = t) }
-                val url = tab.url
-                if (!tab.isPrivate && t.isNotBlank() && url.startsWith("http")) {
-                    scope.launch(dbDispatcher) { db.updateTitle(url, t) }
-                }
-                scheduleSave()
-            }
-
-            override fun onFullScreen(session: GeckoSession, fullScreen: Boolean) {
-                uiHost?.onFullScreen(tab, fullScreen)
-            }
-
-            override fun onCloseRequest(session: GeckoSession) {
-                close(tab.id)
-            }
-
-            override fun onExternalResponse(session: GeckoSession, response: WebResponse) {
-                val host = uiHost
-                if (host == null) {
-                    runCatching { response.body?.close() }
-                } else {
-                    host.confirmDownload(tab, response)
-                }
-            }
-
-            override fun onCrash(session: GeckoSession) = recoverFromCrash(tab, session)
-
-            override fun onKill(session: GeckoSession) = recoverFromCrash(tab, session)
-        }
-
-        session.historyDelegate = object : HistoryDelegate {
-            override fun onVisited(
-                session: GeckoSession,
-                url: String,
-                lastVisitedURL: String?,
-                flags: Int,
-            ): GeckoResult<Boolean> {
-                val skip = tab.isPrivate ||
-                    flags and HistoryDelegate.VISIT_TOP_LEVEL == 0 ||
-                    flags and (HistoryDelegate.VISIT_REDIRECT_SOURCE or HistoryDelegate.VISIT_REDIRECT_SOURCE_PERMANENT or
-                        HistoryDelegate.VISIT_UNRECOVERABLE_ERROR) != 0 ||
-                    !(url.startsWith("http://") || url.startsWith("https://"))
-                if (skip) return GeckoResult.fromValue(false)
-                // 标题此时可能还是上一页的，由 onTitleChange 随后写入
+        override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
+            tab.update { it.copy(url = url) }
+            refreshNav(tab, view)
+            if (!tab.isPrivate && !isReload && (url.startsWith("http://") || url.startsWith("https://"))) {
                 scope.launch(dbDispatcher) { db.recordVisit(url, null) }
-                return GeckoResult.fromValue(true)
             }
+            scheduleSave()
+        }
 
-            override fun getVisited(session: GeckoSession, urls: Array<out String>): GeckoResult<BooleanArray> {
-                if (tab.isPrivate) return GeckoResult.fromValue(BooleanArray(urls.size))
-                val result = GeckoResult<BooleanArray>()
-                val copy = arrayOf(*urls)
-                scope.launch(Dispatchers.IO) { result.complete(runCatching { db.isVisited(copy) }.getOrElse { BooleanArray(copy.size) }) }
-                return result
+        override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+            if (request.isForMainFrame) return null
+            val url = request.url.toString()
+            val accept = request.requestHeaders?.entries?.firstOrNull { it.key.equals("Accept", true) }?.value
+            if (!blocker.shouldBlock(url, tab.pageHost, accept)) return null
+            scope.launch { tab.update { it.copy(blockedCount = it.blockedCount + 1) } }
+            return blocker.emptyResponse()
+        }
+
+        @SuppressLint("WebViewClientOnReceivedSslError")
+        override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
+            // 不放行任何证书错误
+            handler.cancel()
+            tab.update { it.copy(secure = false, loading = false) }
+            if (error.url == view.url || error.url == tab.url) {
+                view.loadDataWithBaseURL(null, ErrorPages.certificateError(error.url), "text/html", "utf-8", error.url)
             }
+        }
+
+        override fun onReceivedHttpAuthRequest(view: WebView, handler: HttpAuthHandler, host: String?, realm: String?) {
+            dialogs.httpAuth(host, realm, handler)
+        }
+
+        override fun onSafeBrowsingHit(view: WebView, request: WebResourceRequest, threatType: Int, callback: SafeBrowsingResponseCompat) {
+            // 安全浏览命中：返回安全页面并上报（系统 WebView 的标准做法）
+            when {
+                WebViewFeature.isFeatureSupported(WebViewFeature.SAFE_BROWSING_RESPONSE_BACK_TO_SAFETY) -> callback.backToSafety(true)
+                WebViewFeature.isFeatureSupported(WebViewFeature.SAFE_BROWSING_RESPONSE_SHOW_INTERSTITIAL) -> callback.showInterstitial(true)
+                else -> view.stopLoading()
+            }
+        }
+
+        override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+            Log.w(TAG, "渲染进程退出（crash=${detail.didCrash()}）：${tab.url}")
+            if (tab.view === view) {
+                destroyView(tab)
+                if (_selectedId.value == tab.id) {
+                    ensureView(tab)
+                    _sessionEpoch.value++
+                }
+            }
+            return true
         }
     }
 
-    private fun handleLoadRequest(tab: Tab, request: NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny> =
-        when (val d = LinkPolicy.decide(request.uri, request.isDirectNavigation)) {
-            LinkDecision.LoadInBrowser -> GeckoResult.allow()
-            LinkDecision.Block -> GeckoResult.deny()
-            is LinkDecision.OpenExternally -> {
-                uiHost?.confirmExternalLink(tab, d.uri)
-                GeckoResult.deny()
-            }
+    private inner class Chrome(private val tab: Tab) : WebChromeClient() {
+        override fun onProgressChanged(view: WebView, newProgress: Int) {
+            tab.update { it.copy(progress = newProgress, loading = newProgress < 100) }
         }
 
-    private fun recoverFromCrash(tab: Tab, session: GeckoSession) {
-        Log.w(TAG, "内容进程崩溃/被回收：${tab.url}")
-        if (tab.session === session) {
-            runCatching { session.close() }
-            tab.session = null
-            if (_selectedId.value == tab.id) {
-                ensureSession(tab).setActive(true)
-                _sessionEpoch.value++
+        override fun onReceivedTitle(view: WebView, title: String?) {
+            val t = title.orEmpty()
+            tab.update { it.copy(title = t) }
+            val url = tab.url
+            if (!tab.isPrivate && t.isNotBlank() && url.startsWith("http")) {
+                scope.launch(dbDispatcher) { db.updateTitle(url, t) }
             }
+            scheduleSave()
         }
+
+        override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message): Boolean {
+            // 没有用户手势的弹窗一律拦截
+            if (!isUserGesture) return false
+            val child = Tab(
+                id = UUID.randomUUID().toString(),
+                isPrivate = tab.isPrivate, parentId = tab.id, openedByOtherApp = false,
+                url = "", title = "", desktopMode = tab.state.value.desktopMode,
+                sessionState = null, lastActiveAt = System.currentTimeMillis(),
+            )
+            val childView = buildView(child)
+            child.view = childView
+            _tabs.value = _tabs.value + child
+            (resultMsg.obj as WebView.WebViewTransport).webView = childView
+            resultMsg.sendToTarget()
+            tab.view?.onPause()
+            _selectedId.value = child.id
+            onTabOpenedByPage?.invoke(child)
+            scheduleSave()
+            return true
+        }
+
+        override fun onCloseWindow(window: WebView) = close(tab.id)
+
+        override fun onShowFileChooser(webView: WebView, filePathCallback: ValueCallback<Array<Uri>>, fileChooserParams: FileChooserParams) =
+            dialogs.chooseFiles(filePathCallback, fileChooserParams)
+
+        override fun onPermissionRequest(request: PermissionRequest) = dialogs.permission(request)
+
+        override fun onGeolocationPermissionsShowPrompt(origin: String, callback: GeolocationPermissions.Callback) =
+            dialogs.geolocation(origin, callback)
+
+        override fun onShowCustomView(view: View, callback: CustomViewCallback) {
+            uiHost?.showCustomView(tab, view, callback) ?: callback.onCustomViewHidden()
+        }
+
+        override fun onHideCustomView() {
+            uiHost?.hideCustomView()
+        }
+
+        override fun onJsAlert(view: WebView, url: String?, message: String?, result: JsResult) = dialogs.alert(url, message, result)
+        override fun onJsConfirm(view: WebView, url: String?, message: String?, result: JsResult) = dialogs.confirm(url, message, result)
+        override fun onJsPrompt(view: WebView, url: String?, message: String?, defaultValue: String?, result: JsPromptResult) =
+            dialogs.prompt(url, message, defaultValue, result)
+        override fun onJsBeforeUnload(view: WebView, url: String?, message: String?, result: JsResult) = dialogs.beforeUnload(result)
     }
 
     companion object {
         private const val TAG = "TabManager"
-        private const val MAX_BACKGROUND_SESSIONS = 4
-        const val ERROR_PAGE_PREFIX = "data:text/html;charset=utf-8;base64,"
+        private const val MAX_BACKGROUND_VIEWS = 4
+
+        /** 默认 Profile 的 Cookie 管理器（普通标签使用）。 */
+        fun defaultCookies(): CookieManager = CookieManager.getInstance()
+
+        fun webViewPackageDescription(context: Context): String =
+            WebViewCompat.getCurrentWebViewPackage(context)?.let { "${it.packageName} ${it.versionName}" } ?: "未知"
     }
 }

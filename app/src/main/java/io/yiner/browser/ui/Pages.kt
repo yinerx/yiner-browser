@@ -37,7 +37,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.yiner.browser.BuildConfig
 import io.yiner.browser.MainActivity
-import io.yiner.browser.browser.AdBlocker
+import io.yiner.browser.blocking.ContentBlocker
+import io.yiner.browser.browser.TabManager
 import io.yiner.browser.core.ArchiveAfter
 import io.yiner.browser.core.DownloadNaming
 import io.yiner.browser.core.SearchEngine
@@ -59,8 +60,7 @@ import io.yiner.browser.ui.arc.SiteBadge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.mozilla.geckoview.BuildConfig as GeckoBuildConfig
-import org.mozilla.geckoview.StorageController
+import java.io.File
 import java.text.DateFormat
 import java.util.Date
 
@@ -69,8 +69,14 @@ private fun formatTime(t: Long): String =
 
 private fun MainActivity.updateSettings(transform: (Settings) -> Settings) {
     app.prefs.update(transform)
-    AdBlocker.applyRuntimeSettings(app.runtime, app.prefs.settings.value)
+    app.tabManager.applyThirdPartyCookies(app.prefs.settings.value.thirdPartyCookies)
 }
+
+/** 旧内核（GeckoView，0.2.0 及更早）留下的配置目录。不会自动删除，只能由用户在设置中手动清理。 */
+private fun oldEngineDirs(activity: MainActivity) = listOf(File(activity.filesDir, "mozilla"), File(activity.cacheDir, "mozilla"))
+    .filter { it.exists() }
+
+private fun dirSize(f: File): Long = if (f.isFile) f.length() else f.listFiles()?.sumOf { dirSize(it) } ?: 0L
 
 @Composable
 private fun Empty(text: String) = SettingsNote(text)
@@ -85,6 +91,13 @@ fun SettingsPage(activity: MainActivity) {
     val isDefault by activity.isDefaultBrowser
     var showClear by remember { mutableStateOf(false) }
     var showLicenses by remember { mutableStateOf(false) }
+    var showOldEngine by remember { mutableStateOf(false) }
+    var oldEngineBytes by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(showOldEngine) {
+        oldEngineBytes = withContext(Dispatchers.IO) {
+            oldEngineDirs(activity).takeIf { it.isNotEmpty() }?.sumOf { dirSize(it) }
+        }
+    }
 
     AppSettingsContent(
         AppSettingsModel(
@@ -94,7 +107,8 @@ fun SettingsPage(activity: MainActivity) {
             autoOpenKeyboard = settings.autoOpenKeyboard,
             searchSuggestions = settings.searchSuggestions,
             versionName = BuildConfig.VERSION_NAME,
-            engineDescription = "内核 GeckoView ${GeckoBuildConfig.MOZ_APP_VERSION}（Mozilla）· 个人自用的独立项目",
+            engineDescription = "内核：基于 Chromium 的系统 WebView（${TabManager.webViewPackageDescription(activity)}）· 个人自用的独立项目",
+            oldEngineDataLabel = oldEngineBytes?.let { DownloadNaming.formatSize(it) },
         ),
         onBack = { ui.closeTopOverlay() },
         onOpen = { t ->
@@ -108,6 +122,7 @@ fun SettingsPage(activity: MainActivity) {
                 SettingsTarget.DOWNLOADS -> ui.openPage(Screen.DOWNLOADS)
                 SettingsTarget.HISTORY -> ui.openPage(Screen.HISTORY)
                 SettingsTarget.LICENSES -> showLicenses = true
+                SettingsTarget.OLD_ENGINE_DATA -> showOldEngine = true
             }
         },
         onAutoOpenKeyboard = { v -> activity.updateSettings { it.copy(autoOpenKeyboard = v) } },
@@ -116,16 +131,38 @@ fun SettingsPage(activity: MainActivity) {
     )
 
     if (showClear) ClearDataDialog(activity) { showClear = false }
+    if (showOldEngine) {
+        val scope = rememberCoroutineScope()
+        AlertDialog(
+            onDismissRequest = { showOldEngine = false },
+            title = { Text("清理旧内核数据？") },
+            text = {
+                Text(
+                    "这是 0.2.0 及更早版本（GeckoView 内核）留下的 Cookie、网站存储和缓存，当前的系统 WebView 内核无法读取。" +
+                        "清理后不可恢复；历史记录、下载列表和标签不受影响。",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        withContext(Dispatchers.IO) { oldEngineDirs(activity).forEach { it.deleteRecursively() } }
+                        activity.toast("已清理旧内核数据")
+                        showOldEngine = false
+                    }
+                }) { Text("清理") }
+            },
+            dismissButton = { TextButton(onClick = { showOldEngine = false }) { Text("取消") } },
+        )
+    }
     if (showLicenses) {
         AlertDialog(
             onDismissRequest = { showLicenses = false },
             title = { Text("开源许可") },
             text = {
                 Text(
-                    "GeckoView — Mozilla Public License 2.0\nhttps://www.mozilla.org/MPL/2.0/\n\n" +
-                        "uBlock Origin ${AdBlocker.BUNDLED_VERSION}（Raymond Hill 等）— GPL-3.0\n" +
-                        "源代码：https://github.com/gorhill/uBlock\n本应用内置的是 addons.mozilla.org 发布的官方签名版本，未做任何修改。\n\n" +
-                        "AndroidX / Jetpack Compose / Kotlin — Apache License 2.0",
+                    "网页内核：设备上的 Android System WebView（基于 Chromium，由系统 / Google Play 提供和更新，不随本应用分发）\n\n" +
+                        "EasyList 与 EasyPrivacy 过滤规则 — The EasyList authors (https://easylist.to/)，GPL-3.0 / CC BY-SA 3.0 双许可，未修改\n\n" +
+                        "AndroidX（含 androidx.webkit）/ Jetpack Compose / Kotlin — Apache License 2.0",
                 )
             },
             confirmButton = { TextButton(onClick = { showLicenses = false }) { Text("好") } },
@@ -153,35 +190,42 @@ fun SearchEnginesPage(activity: MainActivity) {
 fun GlobalSiteSettingsPage(activity: MainActivity) {
     val app = activity.app
     val settings by app.prefs.settings.collectAsState()
-    val adStatus by app.adBlocker.status.collectAsState()
+    val status by app.blocker.status.collectAsState()
+    val scope = rememberCoroutineScope()
+    var updating by remember { mutableStateOf(false) }
     SettingsScaffold("全局网站设置", onBack = { activity.ui.closeTopOverlay() }) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding()) {
-            val adSubtitle = when (val s = adStatus) {
-                AdBlocker.Status.Installing -> "正在安装 uBlock Origin…"
-                is AdBlocker.Status.Ready -> "uBlock Origin ${s.version}"
-                is AdBlocker.Status.Failed -> "不可用：${s.message}"
-            }
             SectionHeader("拦截")
-            SettingsRow(ArcIcons.Shield, "拦截广告", subtitle = adSubtitle, trailing = {
-                ArcSwitch(settings.adBlockEnabled) { v -> app.adBlocker.setEnabled(app.runtime, v) }
+            SettingsRow(ArcIcons.Shield, "拦截广告", subtitle = "EasyList 规则：拦截广告请求并隐藏广告位", trailing = {
+                ArcSwitch(settings.adBlockEnabled) { v -> activity.updateSettings { it.copy(adBlockEnabled = v) } }
             })
-            SettingsRow(ArcIcons.Shield, "严格跟踪保护", subtitle = "额外拦截社交跟踪与指纹识别；个别网站或登录流程可能异常", trailing = {
-                ArcSwitch(settings.strictTrackingProtection) { v -> activity.updateSettings { it.copy(strictTrackingProtection = v) } }
+            SettingsRow(ArcIcons.Shield, "拦截跟踪器", subtitle = "EasyPrivacy 规则：拦截分析与跟踪请求", trailing = {
+                ArcSwitch(settings.blockTrackers) { v -> activity.updateSettings { it.copy(blockTrackers = v) } }
             })
-            SettingsRow(ArcIcons.Lock, "仅 HTTPS 模式", subtitle = "不支持 HTTPS 的网站将无法打开", trailing = {
+            val rules = when (val s = status) {
+                ContentBlocker.Status.Loading -> "正在加载规则…"
+                is ContentBlocker.Status.Ready ->
+                    "${s.versions}\n可执行的网络规则 ${s.ads.networkRules + s.trackers.networkRules} 条，元素隐藏规则 ${s.ads.cosmeticRules + s.trackers.cosmeticRules} 条；" +
+                        "跳过 ${s.ads.skippedRules + s.trackers.skippedRules} 条不支持的规则（通配符、正则、资源类型选项、脚本注入等）"
+                is ContentBlocker.Status.Failed -> "规则加载失败：${s.message}"
+            }
+            SettingsRow(null, if (updating) "正在更新规则…" else "更新过滤规则", subtitle = rules, onClick = {
+                if (updating) return@SettingsRow
+                updating = true
+                scope.launch {
+                    activity.toast(app.blocker.updateLists())
+                    updating = false
+                }
+            })
+            SettingsNote("拦截在 WebView 的请求拦截接口中进行，只覆盖网页发起的普通网络请求；不能修改网页脚本，也无法拦截 WebSocket。对单个网站关闭拦截请用页面菜单中的“网站设置”。")
+
+            SectionHeader("隐私")
+            SettingsRow(ArcIcons.Lock, "仅 HTTPS 模式", subtitle = "自动把网页地址从 http 升级为 https；不支持 HTTPS 的网站将无法打开", trailing = {
                 ArcSwitch(settings.httpsOnly) { v -> activity.updateSettings { it.copy(httpsOnly = v) } }
             })
-            if (adStatus is AdBlocker.Status.Ready) {
-                SectionHeader("uBlock Origin")
-                SettingsRow(null, "过滤规则与信任站点", subtitle = "打开 uBlock Origin 控制面板") {
-                    val url = app.adBlocker.optionsPageUrl
-                    if (url != null) activity.openInNewTab(url) else activity.toast("uBlock Origin 未提供设置页")
-                }
-                SettingsRow(null, "检查 uBlock Origin 更新", subtitle = "通过 addons.mozilla.org") {
-                    activity.toast("正在检查…")
-                    app.adBlocker.checkForUpdate(app.runtime) { activity.toast(it) }
-                }
-            }
+            SettingsRow(ArcIcons.Globe, "允许第三方 Cookie", subtitle = "默认关闭；部分网站的嵌入式登录或评论组件需要开启", trailing = {
+                ArcSwitch(settings.thirdPartyCookies) { v -> activity.updateSettings { it.copy(thirdPartyCookies = v) } }
+            })
         }
     }
 }
@@ -395,11 +439,12 @@ private fun ClearDataDialog(activity: MainActivity, onDismiss: () -> Unit) {
         },
         confirmButton = {
             TextButton(onClick = {
-                var flags = 0L
-                if (cookies) flags = flags or StorageController.ClearFlags.COOKIES or StorageController.ClearFlags.SITE_DATA or
-                    StorageController.ClearFlags.DOM_STORAGES or StorageController.ClearFlags.AUTH_SESSIONS
-                if (cache) flags = flags or StorageController.ClearFlags.ALL_CACHES
-                if (flags != 0L) app.runtime.storageController.clearData(flags)
+                // 只清除普通标签（默认 Profile）的数据；无痕数据在关闭全部无痕标签时已清空
+                if (cookies) {
+                    android.webkit.CookieManager.getInstance().removeAllCookies(null)
+                    android.webkit.WebStorage.getInstance().deleteAllData()
+                }
+                if (cache) android.webkit.WebView(activity).apply { clearCache(true); destroy() }
                 scope.launch {
                     withContext(Dispatchers.IO) {
                         if (history) app.db.clearHistory()

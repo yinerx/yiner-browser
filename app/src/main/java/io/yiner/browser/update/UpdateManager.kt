@@ -97,7 +97,11 @@ class UpdateManager(private val context: Context, private val scope: CoroutineSc
     }
 
     /** 应用启动时调用：同步定期任务，按设置做一次（限频的）启动检查。 */
+    /** 测试版（包名带 .debug、调试签名）不参与应用内更新：Release 中的正式包包名与签名都不同，必然被安全校验拒绝。 */
+    val isTestBuild: Boolean = context.packageName.endsWith(".debug")
+
     fun onAppStart() {
+        if (isTestBuild) return
         schedulePeriodic()
         if (_settings.value.checkOnStartup) scope.launch { check(manual = false) }
     }
@@ -120,6 +124,7 @@ class UpdateManager(private val context: Context, private val scope: CoroutineSc
      * 自动检查至少间隔 12 小时，手动至少间隔 1 分钟；被 GitHub 限流时在解除前不再请求。
      */
     suspend fun check(manual: Boolean): String = checkLock.withLock {
+        if (isTestBuild) return "测试版（${context.packageName}）不参与应用内更新，请从 GitHub Releases 安装正式版"
         val now = System.currentTimeMillis()
         val busy = _status.value.let {
             it is UpdateStatus.Queued || it is UpdateStatus.Downloading || it is UpdateStatus.Verifying || it is UpdateStatus.Installing

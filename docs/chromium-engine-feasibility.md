@@ -72,3 +72,16 @@
 - `ui/arc/*`
 - `ui/ScreenContents.kt`
 - `ui/TabSwitcher.kt` 中的 `TabSwitcherContent`
+
+## 6. 2026-11-14 决定：改用基于 Chromium 的系统 WebView
+
+用户决定不再等待完整 Chromium 的构建资源，改用 Android 系统 WebView。需要说明：
+- 它是**基于 Chromium 的系统组件**，不是完整的 Chromium 浏览器，不能称为“完整 Chromium”；
+- 内核随系统 / Google Play 更新，本应用不再分发浏览器引擎。
+
+与 GeckoView 方案相比：
+- 不支持扩展（uBlock Origin 已移除），广告拦截改为请求拦截 + 规则子集；
+- Google 依据其 OAuth 政策，可能拒绝在 WebView 中登录；
+- 无痕隔离依赖 WebView 的 `MULTI_PROFILE`，较旧的 WebView 不支持。
+
+实现细节和边界见 README 的“关于 Google 登录”“广告与跟踪屏蔽”“无痕模式”“从 0.2.0（GeckoView）升级”。

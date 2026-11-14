@@ -32,20 +32,21 @@ fun BrowserApp(activity: MainActivity) {
     val selected = tabs.firstOrNull { it.id == selectedId }
     val sessionEpoch by tm.sessionEpoch.collectAsState()
 
-    // 选中的标签（或其会话）变化时，把它的会话挂到唯一的 GeckoView 上
+    // 选中的标签（或其 WebView）变化时，把它的 WebView 放进界面中唯一的网页容器
     LaunchedEffect(selected, sessionEpoch) {
-        val gv = activity.geckoView
+        val container = activity.webContainer
         if (selected == null) {
-            if (gv.session != null) gv.releaseSession()
+            container.removeAllViews()
             if (ui.screen == Screen.BROWSER) ui.screen = Screen.TABS
-            if (ui.fullscreen) activity.setFullscreen(false)
+            if (ui.fullscreen) activity.exitCustomView()
         } else {
-            val session = tm.ensureSession(selected)
-            if (gv.session !== session) {
-                if (gv.session != null) gv.releaseSession()
-                gv.setSession(session)
+            val view = tm.ensureView(selected)
+            if (view.parent !== container) {
+                container.removeAllViews()
+                (view.parent as? android.view.ViewGroup)?.removeView(view)
+                container.addView(view, android.widget.FrameLayout.LayoutParams(-1, -1))
             }
-            session.setActive(true)
+            view.onResume()
         }
     }
 
@@ -73,12 +74,12 @@ fun BrowserApp(activity: MainActivity) {
     )
     BackHandler(enabled = backAction != BackAction.SYSTEM) {
         when (backAction) {
-            BackAction.EXIT_FULLSCREEN -> selected?.session?.exitFullScreen() ?: activity.setFullscreen(false)
+            BackAction.EXIT_FULLSCREEN -> activity.exitCustomView()
             BackAction.CLOSE_OVERLAY -> {
-                if (ui.findOpen) selected?.session?.finder?.clear()
+                if (ui.findOpen) selected?.view?.clearMatches()
                 ui.closeTopOverlay()
             }
-            BackAction.GO_BACK_IN_PAGE -> selected?.session?.goBack()
+            BackAction.GO_BACK_IN_PAGE -> selected?.view?.goBack()
             BackAction.CLOSE_TAB_AND_RETURN_TO_APP -> {
                 selected?.let { tm.close(it.id) }
                 ui.screen = Screen.TABS
@@ -91,13 +92,13 @@ fun BrowserApp(activity: MainActivity) {
     }
 
     Box(Modifier.fillMaxSize().background(Color.White)) {
-        // 浏览界面（01）：网页占满主体，底部是轻薄工具栏；GeckoView 始终保留在界面树里，避免反复重建 Surface
+        // 浏览界面（01）：网页占满主体，底部是轻薄工具栏；网页容器始终保留在界面树里
         Column(
             Modifier.fillMaxSize()
                 .then(if (ui.fullscreen) Modifier else Modifier.statusBarsPadding().imePadding()),
         ) {
             AndroidView(
-                factory = { activity.geckoView },
+                factory = { activity.webContainer },
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 update = { it.visibility = if (ui.screen == Screen.BROWSER) View.VISIBLE else View.INVISIBLE },
             )
@@ -141,5 +142,10 @@ fun BrowserApp(activity: MainActivity) {
         }
 
         ui.search?.let { SearchLayer(activity, it) }
+
+        // 网页全屏（例如全屏视频）：覆盖整个界面
+        if (ui.fullscreen) {
+            AndroidView(factory = { activity.fullscreenContainer }, modifier = Modifier.fillMaxSize())
+        }
     }
 }

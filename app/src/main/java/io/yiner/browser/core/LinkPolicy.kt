@@ -2,7 +2,7 @@ package io.yiner.browser.core
 
 /** 页面导航请求的处理方式。 */
 sealed interface LinkDecision {
-    /** 交给 GeckoView 在当前标签内加载。 */
+    /** 交给 WebView 在当前标签内加载。 */
     data object LoadInBrowser : LinkDecision
 
     /** 需要交给其它 App（电话、邮件、intent:// 等），必须先征得用户同意。 */

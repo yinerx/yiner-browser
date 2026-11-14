@@ -1,6 +1,5 @@
 package io.yiner.browser.core
 
-import io.yiner.browser.browser.AdBlocker
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -150,13 +149,4 @@ class SuggestionsTest {
     )
 
     @Test fun garbage() = assertEquals(emptyList<String>(), Suggestions.parseOpenSearch("<html>"))
-}
-
-class AdBlockerVersionTest {
-    @Test fun compare() {
-        assertTrue(AdBlocker.isOlder("1.75.2", "1.76.0"))
-        assertFalse(AdBlocker.isOlder("1.76.0", "1.76.0"))
-        assertFalse(AdBlocker.isOlder("1.77.0b3", "1.76.0"))
-        assertTrue(AdBlocker.isOlder("1.9", "1.76"))
-    }
 }

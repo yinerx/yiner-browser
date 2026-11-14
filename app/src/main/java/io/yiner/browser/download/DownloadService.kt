@@ -78,15 +78,31 @@ class DownloadService : Service() {
             var status = DownloadStatus.FAILED
             var finalName = job.fileName
             var contentUri: android.net.Uri? = null
-            val body = job.response.body
+            var body: java.io.InputStream? = null
+            var conn: java.net.HttpURLConnection? = null
             try {
-                if (body == null) error("服务器没有返回内容")
+                val req = job.request
+                body = if (req.inlineBytes != null) {
+                    req.inlineBytes.inputStream()
+                } else {
+                    if (!(req.url.startsWith("https://") || req.url.startsWith("http://"))) error("不支持的下载地址")
+                    (java.net.URL(req.url).openConnection() as java.net.HttpURLConnection).also { c ->
+                        conn = c
+                        c.connectTimeout = 20_000
+                        c.readTimeout = 60_000
+                        c.instanceFollowRedirects = true
+                        req.userAgent?.let { c.setRequestProperty("User-Agent", it) }
+                        req.referer?.let { c.setRequestProperty("Referer", it) }
+                        req.cookies?.let { c.setRequestProperty("Cookie", it) }
+                        if (c.responseCode !in 200..299) error("服务器返回 HTTP " + c.responseCode)
+                    }.inputStream
+                }
                 val target = app.downloads.createTarget(job.fileName, job.mimeType)
                 contentUri = target.uri
                 var ok = false
                 try {
                     target.output.use { out ->
-                        body.use { input ->
+                        body!!.use { input ->
                             val buf = ByteArray(64 * 1024)
                             var lastNotify = 0L
                             while (true) {
@@ -114,6 +130,7 @@ class DownloadService : Service() {
                 Log.w(TAG, "下载失败：${job.fileName}", e)
                 runCatching { body?.close() }
             } finally {
+                conn?.disconnect()
                 if (!job.isPrivate) {
                     app.db.updateDownload(job.id, done, status, contentUri?.takeIf { status == DownloadStatus.DONE }?.toString(), finalName)
                 }

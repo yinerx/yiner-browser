@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  应用名称 app_name 由 app/build.gradle.kts 中各构建类型的 resValue 提供：
+  release = “银耳浏览器”，debug = “银耳浏览器 测试版”（包名 io.yiner.browser.debug，可与正式版并存安装）。
+-->
 <resources>
-    <string name="app_name">银耳浏览器</string>
 </resources>

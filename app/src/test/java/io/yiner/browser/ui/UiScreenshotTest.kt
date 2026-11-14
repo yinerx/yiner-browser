@@ -135,7 +135,7 @@ class UiScreenshotTest {
         AppSettingsContent(
             AppSettingsModel(
                 isDefaultBrowser = false, searchEngineLabel = "Google", archiveLabel = "1 天后",
-                autoOpenKeyboard = true, searchSuggestions = true, versionName = "0.2.0", engineDescription = "内核 GeckoView 160.0",
+                autoOpenKeyboard = true, searchSuggestions = true, versionName = "0.2.0", engineDescription = "内核：基于 Chromium 的系统 WebView",
             ),
             onBack = {}, onOpen = {}, onAutoOpenKeyboard = {}, onSearchSuggestions = {},
             updateSection = { Text("（更新分区）", Modifier.fillMaxWidth().padding(start = 66.dp)) },

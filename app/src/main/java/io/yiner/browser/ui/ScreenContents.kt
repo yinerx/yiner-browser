@@ -109,7 +109,8 @@ fun PageMenuContent(m: PageMenuModel, a: PageMenuActions) {
                 TileItem(ArcIcons.Share, "分享", a.onShare),
             ),
         )
-        Spacer(Modifier.height(10.dp))
+        // 02：四宫格底部到第一行中心约 174 px ≈ 64dp（行高一半 36.5dp + 28dp）
+        Spacer(Modifier.height(28.dp))
         MenuRow(ArcIcons.Zoom, "文字缩放", subtitle = "${m.textZoomPercent}%") {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { a.onZoom(m.textZoomPercent + 10) }) {
@@ -134,11 +135,11 @@ fun PageMenuContent(m: PageMenuModel, a: PageMenuActions) {
         Box(Modifier.fillMaxWidth().padding(top = 6.dp).height(1.dp).background(ArcTokens.MenuDivider))
         Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 18.dp)) {
             Text(
-                if (m.blockedCount > 0) "已拦截 ${m.blockedCount} 个跟踪器" else "本页未拦截到跟踪器",
+                if (m.blockedCount > 0) "已拦截 ${m.blockedCount} 个广告和跟踪请求" else "本页未拦截到广告和跟踪请求",
                 fontSize = ArcTokens.MenuTitleSize, color = ArcTokens.TextPrimary,
             )
             Text(
-                "广告由 uBlock Origin 拦截，不计入此数。有问题？可在网站设置中关闭",
+                "有问题？可在网站设置中关闭",
                 fontSize = ArcTokens.MenuSubtitleSize, color = ArcTokens.TextSecondary,
             )
         }
@@ -254,9 +255,11 @@ data class AppSettingsModel(
     val searchSuggestions: Boolean,
     val versionName: String,
     val engineDescription: String,
+    /** 旧内核（GeckoView）遗留数据的大小；为 null 表示没有遗留数据，不显示该项。 */
+    val oldEngineDataLabel: String? = null,
 )
 
-enum class SettingsTarget { GLOBAL_SITE, DEFAULT_BROWSER, SEARCH_ENGINES, ARCHIVED, ARCHIVE_AFTER, CLEAR_DATA, DOWNLOADS, HISTORY, LICENSES }
+enum class SettingsTarget { GLOBAL_SITE, DEFAULT_BROWSER, SEARCH_ENGINES, ARCHIVED, ARCHIVE_AFTER, CLEAR_DATA, DOWNLOADS, HISTORY, LICENSES, OLD_ENGINE_DATA }
 
 @Composable
 fun AppSettingsContent(
@@ -286,6 +289,11 @@ fun AppSettingsContent(
             SettingsRow(ArcIcons.Eraser, "清除浏览数据", onClick = { onOpen(SettingsTarget.CLEAR_DATA) })
             SettingsRow(ArcIcons.Folder, "下载", onClick = { onOpen(SettingsTarget.DOWNLOADS) })
             SettingsRow(ArcIcons.History, "历史记录", onClick = { onOpen(SettingsTarget.HISTORY) })
+            if (m.oldEngineDataLabel != null) {
+                SettingsRow(ArcIcons.Eraser, "清理旧内核数据", subtitle = "GeckoView 内核遗留 ${m.oldEngineDataLabel}，当前内核无法使用") {
+                    onOpen(SettingsTarget.OLD_ENGINE_DATA)
+                }
+            }
 
             SectionHeader("选项")
             SettingsRow(ArcIcons.Keyboard, "自动弹出键盘", subtitle = "打开应用时直接显示搜索面板", trailing = {

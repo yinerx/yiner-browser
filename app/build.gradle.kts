@@ -14,12 +14,9 @@ val hasReleaseSigning = releaseKeystorePath != null && releaseStorePassword != n
 // CI 发布时传 -Pyiner.requireReleaseSigning=true：缺少签名配置直接失败，绝不发布调试签名的包
 val requireReleaseSigning = providers.gradleProperty("yiner.requireReleaseSigning").orNull == "true"
 
-// GeckoView 稳定版（Mozilla 官方 Maven，MPL-2.0）。只引入 arm64-v8a 变体。
-val geckoviewVersion = "160.0.20261104181552"
 
 android {
     namespace = "io.yiner.browser"
-    // GeckoView 160 的 AAR 元数据要求 compileSdk ≥ 37.2
     compileSdk {
         version = release(37) { minorApiLevel = 2 }
     }
@@ -31,7 +28,7 @@ android {
         // versionCode 必须单调递增：应用内更新只比较它
         versionCode = 2
         versionName = "0.2.0"
-        ndk { abiFilters += "arm64-v8a" }
+        // 内核为系统 WebView，APK 不含原生库，适用于所有 CPU 架构
         // 应用内更新只信任这个仓库的 GitHub Releases
         buildConfigField("String", "UPDATE_REPO", "\"yinerx/yiner-browser\"")
     }
@@ -48,7 +45,13 @@ android {
     }
 
     buildTypes {
+        debug {
+            // 测试包与正式版并存安装：不同包名、名称带“测试版”，不会覆盖或要求卸载正式版
+            applicationIdSuffix = ".debug"
+            resValue("string", "app_name", "银耳浏览器 测试版")
+        }
         release {
+            resValue("string", "app_name", "银耳浏览器")
             isMinifyEnabled = false
             signingConfig = when {
                 hasReleaseSigning -> signingConfigs.getByName("release")
@@ -68,15 +71,14 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        // 用于按构建类型提供应用名称（正式版 / 测试版）
+        resValues = true
     }
 
     lint {
         abortOnError = true
         checkReleaseBuilds = false
-        // GeckoView 版本号是日期戳，不需要提示“有新版本”
         disable += setOf("GradleDependency", "NewerVersionAvailable", "AndroidGradlePluginVersion")
-        // 刻意只打 arm64-v8a（手机自用），不支持 ChromeOS x86_64
-        disable += "ChromeOsAbiSupport"
         // targetSdk 36 是已在 Android 16 行为下设计的版本；37 的行为变更未经验证，暂不提升
         disable += "OldTargetApi"
     }
@@ -96,7 +98,8 @@ android {
 }
 
 dependencies {
-    implementation("org.mozilla.geckoview:geckoview-arm64-v8a:$geckoviewVersion")
+    // 内核：Android 系统 WebView（基于 Chromium，由系统/Play 商店更新），androidx.webkit 提供多配置文件等兼容接口
+    implementation("androidx.webkit:webkit:1.18.0")
 
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.compose.ui:ui")

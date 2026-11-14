@@ -14,12 +14,16 @@ data class Settings(
     val searchEngine: SearchEngine = SearchEngine.DEFAULT,
     val searchSuggestions: Boolean = true,
     val archiveAfter: ArchiveAfter = ArchiveAfter.DEFAULT,
+    /** 拦截广告（EasyList）。 */
     val adBlockEnabled: Boolean = true,
-    val strictTrackingProtection: Boolean = false,
+    /** 拦截跟踪器（EasyPrivacy）。 */
+    val blockTrackers: Boolean = true,
+    /** 允许第三方 Cookie（部分网站的嵌入式登录需要；默认关闭）。 */
+    val thirdPartyCookies: Boolean = false,
     val httpsOnly: Boolean = false,
     /** 打开应用时自动弹出搜索面板与键盘（05 “Auto-Open Keyboard”）。 */
     val autoOpenKeyboard: Boolean = true,
-    /** 网页文字缩放（百分比，GeckoView 全局字体缩放）。 */
+    /** 网页文字缩放（百分比，WebView textZoom）。 */
     val textZoomPercent: Int = 100,
 )
 
@@ -34,7 +38,8 @@ class Prefs(context: Context) {
         searchSuggestions = sp.getBoolean("search_suggestions", true),
         archiveAfter = ArchiveAfter.fromHours(sp.getInt("archive_hours", ArchiveAfter.DEFAULT.hours)),
         adBlockEnabled = sp.getBoolean("adblock", true),
-        strictTrackingProtection = sp.getBoolean("strict_tp", false),
+        blockTrackers = sp.getBoolean("block_trackers", true),
+        thirdPartyCookies = sp.getBoolean("third_party_cookies", false),
         httpsOnly = sp.getBoolean("https_only", false),
         autoOpenKeyboard = sp.getBoolean("auto_open_keyboard", true),
         textZoomPercent = sp.getInt("text_zoom", 100),
@@ -47,7 +52,8 @@ class Prefs(context: Context) {
             putBoolean("search_suggestions", s.searchSuggestions)
             putInt("archive_hours", s.archiveAfter.hours)
             putBoolean("adblock", s.adBlockEnabled)
-            putBoolean("strict_tp", s.strictTrackingProtection)
+            putBoolean("block_trackers", s.blockTrackers)
+            putBoolean("third_party_cookies", s.thirdPartyCookies)
             putBoolean("https_only", s.httpsOnly)
             putBoolean("auto_open_keyboard", s.autoOpenKeyboard)
             putInt("text_zoom", s.textZoomPercent)
@@ -79,7 +85,25 @@ class Prefs(context: Context) {
         return isPinned(url)
     }
 
-    var installedAdBlockerVersion: String?
-        get() = sp.getString("adblock_installed_version", null)
-        set(v) = sp.edit { putString("adblock_installed_version", v) }
+    /** 对单个网站关闭拦截的名单（按近似可注册域名保存）。 */
+    private val _blockingAllowlist = MutableStateFlow(sp.getStringSet("blocking_allowlist", emptySet())!!.toSet())
+    val blockingAllowlist: StateFlow<Set<String>> = _blockingAllowlist.asStateFlow()
+
+    fun setSiteBlocking(baseDomain: String, enabled: Boolean) {
+        val now = if (enabled) _blockingAllowlist.value - baseDomain else _blockingAllowlist.value + baseDomain
+        sp.edit { putStringSet("blocking_allowlist", now) }
+        _blockingAllowlist.value = now
+    }
+
+    /** 已向用户说明过“内核已换为系统 WebView、需重新登录”。 */
+    var webViewMigrationNoticeShown: Boolean
+        get() = sp.getBoolean("webview_migration_notice", false)
+        set(v) = sp.edit { putBoolean("webview_migration_notice", v) }
+
+    /** 本次运行中已就 Google 登录限制提示过（不持久化，每次启动提示一次）。 */
+    @Volatile var googleSignInNoticeShown: Boolean = false
+
+    var filtersUpdatedAt: Long
+        get() = sp.getLong("filters_updated_at", 0)
+        set(v) = sp.edit { putLong("filters_updated_at", v) }
 }

@@ -28,6 +28,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -55,7 +56,6 @@ import io.yiner.browser.ui.arc.ArcSheet
 import io.yiner.browser.ui.arc.ArcSwitch
 import io.yiner.browser.ui.arc.ArcTokens
 import io.yiner.browser.ui.arc.SettingsRow
-import org.mozilla.geckoview.GeckoSession
 
 /**
  * 带遮罩的底部面板容器。点遮罩关闭。
@@ -107,11 +107,11 @@ fun PageMenu(activity: MainActivity, tab: Tab, state: TabState, onDismiss: () ->
                 blockedCount = state.blockedCount,
             ),
             PageMenuActions(
-                onBack = act { tab.session?.goBack() },
-                onForward = act { tab.session?.goForward() },
+                onBack = act { tab.view?.goBack() },
+                onForward = act { tab.view?.goForward() },
                 onEditAddress = act { ui.search = SearchRequest(state.url, inCurrentTab = true, isPrivate = tab.isPrivate) },
                 onCopyLink = act { activity.copyUrl(tab) },
-                onRefreshOrStop = act { if (state.loading) tab.session?.stop() else tab.session?.reload() },
+                onRefreshOrStop = act { if (state.loading) tab.view?.stopLoading() else tab.view?.reload() },
                 onTogglePin = act {
                     val now = prefs.togglePin(state.url, tab.displayTitle)
                     activity.toast(if (now) "已固定，会显示在搜索面板中" else "已取消固定")
@@ -128,8 +128,9 @@ fun PageMenu(activity: MainActivity, tab: Tab, state: TabState, onDismiss: () ->
 }
 
 /**
- * 单个网站的设置面板（参考 Google Play 宣传图中的 “Site Settings” 面板）。
- * “拦截 Cookie 横幅”没有做：GeckoView 160 未提供对应接口。
+ * 单个网站的设置面板（参考 Google Play 宣传图中的 “Site Settings” 面板：拦截广告 / 拦截 Cookie 横幅 / 拦截跟踪器）。
+ * 这里把“拦截广告”和“拦截跟踪器”合并为一个对本站生效的开关（两类规则共用同一个站点放行名单）；
+ * “拦截 Cookie 横幅”没有做：系统 WebView 没有对应接口，银耳浏览器也没有实现规则化的横幅处理。
  */
 @Composable
 fun SiteSettingsSheet(activity: MainActivity, tab: Tab, state: TabState, onDismiss: () -> Unit) {
@@ -142,21 +143,18 @@ fun SiteSettingsSheet(activity: MainActivity, tab: Tab, state: TabState, onDismi
                 "${UrlInput.displayHost(state.url).ifBlank { "此网站" }} 设置",
                 Modifier.padding(start = 24.dp, top = 12.dp, bottom = 8.dp), fontSize = 16.sp, color = ArcTokens.TextSecondary,
             )
-            if (state.trackingToggleAvailable) {
-                SettingsRow(ArcIcons.Shield, "拦截跟踪器", subtitle = "仅对此网站生效", trailing = {
-                    ArcSwitch(!state.trackingExempt) { enabled -> app.tabManager.setTrackingExempt(tab, exempt = !enabled) }
-                })
-            } else {
-                SettingsRow(ArcIcons.Shield, "拦截跟踪器", subtitle = "此页面不支持单独设置")
-            }
-            SettingsRow(ArcIcons.Shield, "拦截广告（全局）", subtitle = "要放行单个网站，请在 uBlock Origin 的信任站点中添加", trailing = {
-                ArcSwitch(settings.adBlockEnabled) { v -> app.adBlocker.setEnabled(app.runtime, v) }
-            })
-            SettingsRow(null, "打开 uBlock Origin 信任站点", onClick = {
-                val url = app.adBlocker.optionsPageUrl
-                onDismiss()
-                if (url != null) activity.openInNewTab(url) else activity.toast("uBlock Origin 尚未就绪")
-            })
+            val globalOff = !settings.adBlockEnabled && !settings.blockTrackers
+            SettingsRow(
+                ArcIcons.Shield, "在此网站拦截广告和跟踪器",
+                subtitle = if (globalOff) "全局已关闭，请先在“设置 → 全局网站设置”中开启" else "关闭后此网站的广告、跟踪请求与广告位都不再拦截",
+                trailing = {
+                    ArcSwitch(state.siteBlockingEnabled && !globalOff) { enabled -> app.tabManager.setSiteBlocking(tab, enabled) }
+                },
+            )
+            SettingsRow(
+                ArcIcons.Info, "本页已拦截 ${state.blockedCount} 个请求",
+                subtitle = "只统计网络请求；按元素隐藏规则隐藏的广告位不计入",
+            )
             Spacer(Modifier.height(12.dp))
             Spacer(Modifier.navigationBarsPadding())
         }
@@ -171,23 +169,23 @@ fun FindBar(tab: Tab, onClose: () -> Unit) {
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
 
+    DisposableEffect(tab) {
+        tab.view?.setFindListener { active, total, done ->
+            if (done) status = if (total == 0) "无结果" else "${active + 1}/$total"
+        }
+        onDispose { tab.view?.setFindListener(null) }
+    }
+
     fun find(backwards: Boolean, again: Boolean) {
-        val finder = tab.session?.finder ?: return
+        val view = tab.view ?: return
         if (query.isEmpty()) {
-            finder.clear(); status = ""; return
+            view.clearMatches(); status = ""; return
         }
-        val flags = if (backwards) GeckoSession.FINDER_FIND_BACKWARDS else 0
-        finder.find(if (again) null else query, flags).accept { r ->
-            status = when {
-                r == null -> ""
-                !r.found -> "无结果"
-                else -> "${r.current}/${r.total}"
-            }
-        }
+        if (again) view.findNext(!backwards) else view.findAllAsync(query)
     }
 
     fun close() {
-        tab.session?.finder?.clear()
+        tab.view?.clearMatches()
         onClose()
     }
 

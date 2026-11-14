@@ -22,7 +22,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
-import androidx.core.graphics.scale
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -38,16 +37,29 @@ import io.yiner.browser.ui.UiState
 import io.yiner.browser.ui.YinerTheme
 import io.yiner.browser.update.UpdateInstaller
 import io.yiner.browser.update.UpdateNotifications
-import org.mozilla.geckoview.GeckoView
-import org.mozilla.geckoview.WebResponse
+import android.content.ComponentName
+import androidx.core.graphics.createBitmap
+import android.graphics.Canvas
+import android.view.View
+import android.view.ViewGroup
+import android.webkit.WebChromeClient
+import android.widget.FrameLayout
+import io.yiner.browser.browser.BlobDownloads
+import io.yiner.browser.browser.DownloadRequest
 import java.io.File
 
 class MainActivity : ComponentActivity(), UiHost {
 
     val app get() = application as YinerApp
     val ui = UiState()
-    lateinit var geckoView: GeckoView
+    /** 承载当前标签 WebView 的容器（界面中始终存在，切换标签时更换子视图）。 */
+    lateinit var webContainer: FrameLayout
         private set
+
+    /** 网页全屏（例如全屏视频）时显示 WebView 提供的视图。 */
+    lateinit var fullscreenContainer: FrameLayout
+        private set
+    private var customViewCallback: WebChromeClient.CustomViewCallback? = null
 
     override val activity get() = this
 
@@ -89,12 +101,14 @@ class MainActivity : ComponentActivity(), UiHost {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        geckoView = GeckoView(this)
+        webContainer = FrameLayout(this)
+        fullscreenContainer = FrameLayout(this).apply { setBackgroundColor(android.graphics.Color.BLACK) }
+        app.blocker // 尽早在后台加载过滤规则
         val tm = app.tabManager
+        tm.attachActivity(this)
         tm.uiHost = this
         tm.onTabOpenedByPage = { showBrowser() }
         tm.restore()
-        app.runtime // 确保运行时和广告屏蔽已初始化
         tm.runAutoArchive()
         if (tm.selectedTab != null) ui.screen = Screen.BROWSER
 
@@ -102,6 +116,29 @@ class MainActivity : ComponentActivity(), UiHost {
 
         if (savedInstanceState == null) handleIntent(intent, coldStart = true)
         app.updates.onAppStart()
+        showMigrationNoticeOnce()
+    }
+
+    /**
+     * 0.2.0 正式版使用 GeckoView 内核，本版改为基于 Chromium 的系统 WebView。两者的 Cookie 与网站存储格式不同，
+     * 无法迁移：首次启动时告知用户需要重新登录。旧数据不会被自动删除（可在设置中手动清理）。
+     */
+    private fun showMigrationNoticeOnce() {
+        val prefs = app.prefs
+        if (prefs.webViewMigrationNoticeShown) return
+        val hadOldEngineData = File(filesDir, "mozilla").exists() || app.tabManager.tabs.value.isNotEmpty()
+        prefs.webViewMigrationNoticeShown = true
+        if (!hadOldEngineData) return
+        AlertDialog.Builder(this)
+            .setTitle("浏览器内核已更换")
+            .setMessage(
+                "银耳浏览器已改用基于 Chromium 的系统 WebView。\n\n" +
+                    "• 网站登录状态（Cookie、网站存储）无法从旧内核迁移，需要重新登录各网站。\n" +
+                    "• 标签网址、历史记录、下载列表、设置和已归档标签已保留；标签的前进/后退历史无法保留。\n" +
+                    "• 旧内核的数据没有被删除，可在“设置 → 存储 → 清理旧内核数据”中手动清理。",
+            )
+            .setPositiveButton("知道了", null)
+            .show()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -120,6 +157,7 @@ class MainActivity : ComponentActivity(), UiHost {
 
     override fun onStop() {
         app.tabManager.saveNow()
+        android.webkit.CookieManager.getInstance().flush()
         super.onStop()
     }
 
@@ -127,8 +165,10 @@ class MainActivity : ComponentActivity(), UiHost {
         if (app.tabManager.uiHost === this) {
             app.tabManager.uiHost = null
             app.tabManager.onTabOpenedByPage = null
+            app.tabManager.attachActivity(null)
         }
-        geckoView.releaseSession()
+        webContainer.removeAllViews()
+        fullscreenContainer.removeAllViews()
         super.onDestroy()
     }
 
@@ -194,21 +234,36 @@ class MainActivity : ComponentActivity(), UiHost {
     /** 截取当前网页的缩略图（缩小到宽 360px，只保存在内存中）。 */
     fun captureThumbnail() {
         val tab = app.tabManager.selectedTab ?: return
-        if (ui.screen != Screen.BROWSER || geckoView.session == null || geckoView.width == 0) return
-        geckoView.capturePixels().accept({ bmp ->
-            if (bmp == null || bmp.width == 0) return@accept
+        val view = tab.view ?: return
+        if (ui.screen != Screen.BROWSER || view.width == 0 || view.height == 0) return
+        runCatching {
             val w = 360
-            val h = (bmp.height * w / bmp.width.toFloat()).toInt().coerceAtLeast(1)
-            val scaled = bmp.scale(w, h)
-            if (scaled !== bmp) bmp.recycle()
-            tab.thumbnail.value = scaled.asImageBitmap()
-        }, { /* 页面尚未绘制等情况：保留旧缩略图 */ })
+            val scale = w / view.width.toFloat()
+            val bmp = createBitmap(w, (view.height * scale).toInt().coerceAtLeast(1))
+            val canvas = Canvas(bmp)
+            canvas.scale(scale, scale)
+            canvas.translate(-view.scrollX.toFloat(), -view.scrollY.toFloat())
+            view.draw(canvas)
+            tab.thumbnail.value = bmp.asImageBitmap()
+        }
     }
 
     fun setTextZoom(percent: Int) {
         val p = percent.coerceIn(50, 300)
         app.prefs.update { it.copy(textZoomPercent = p) }
-        io.yiner.browser.browser.AdBlocker.applyRuntimeSettings(app.runtime, app.prefs.settings.value)
+        app.tabManager.applyTextZoom(p)
+    }
+
+    /** 无痕标签需要系统 WebView 支持多配置文件（MULTI_PROFILE）；不支持时不打开，避免与普通标签共享 Cookie。 */
+    private fun privateUnavailable() =
+        toast("此设备的系统 WebView 不支持隔离的无痕模式，请更新“Android System WebView”后再试")
+
+    /** 用其它浏览器打开（例如 Google 拒绝在 WebView 中登录时）。登录状态不会带回银耳浏览器。 */
+    fun openInOtherBrowser(url: String) {
+        val view = Intent(Intent.ACTION_VIEW, url.toUri()).addCategory(Intent.CATEGORY_BROWSABLE)
+        val chooser = Intent.createChooser(view, "用其它浏览器打开")
+            .putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS, arrayOf(ComponentName(this, MainActivity::class.java)))
+        runCatching { startActivity(chooser) }.onFailure { toast("没有其它可用的浏览器") }
     }
 
     // ------------------------------------------------------------------ 浏览操作（供界面调用）
@@ -217,12 +272,13 @@ class MainActivity : ComponentActivity(), UiHost {
         val url = UrlInput.toLoadableUrl(text, app.prefs.settings.value.searchEngine)
         if (url.isEmpty()) return
         val tm = app.tabManager
-        if (inCurrentTab && tm.selectedTab != null) tm.load(url, tm.selectedTab!!.isPrivate) else tm.newTab(url, isPrivate)
+        val ok = if (inCurrentTab && tm.selectedTab != null) tm.load(url, tm.selectedTab!!.isPrivate) else tm.newTab(url, isPrivate) != null
+        if (!ok) return privateUnavailable()
         showBrowser()
     }
 
     fun openInNewTab(url: String, isPrivate: Boolean = false) {
-        app.tabManager.newTab(url, isPrivate)
+        if (app.tabManager.newTab(url, isPrivate) == null) return privateUnavailable()
         showBrowser()
     }
 
@@ -358,7 +414,7 @@ class MainActivity : ComponentActivity(), UiHost {
         } catch (e: ActivityNotFoundException) {
             val fallback = LinkPolicy.intentFallbackUrl(uri)
             when {
-                fallback != null -> app.tabManager.ensureSession(tab).loadUri(fallback)
+                fallback != null -> app.tabManager.ensureView(tab).loadUrl(fallback)
                 intent.`package` != null -> runCatching {
                     startActivity(Intent(Intent.ACTION_VIEW, "market://details?id=${intent.`package`}".toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 }.onFailure { toast("没有可以打开此链接的应用") }
@@ -369,33 +425,51 @@ class MainActivity : ComponentActivity(), UiHost {
         }
     }
 
-    override fun confirmDownload(tab: Tab, response: WebResponse) {
-        val headers = response.headers.entries.associate { it.key.lowercase() to it.value }
-        val mime = headers["content-type"]
-        val total = headers["content-length"]?.trim()?.toLongOrNull() ?: -1L
-        val name = DownloadNaming.choose(headers["content-disposition"], response.uri, mime) { m ->
+    override fun confirmDownload(tab: Tab, request: DownloadRequest) {
+        val url = request.url
+        var mime = request.mimeType
+        if (url.startsWith("data:")) mime = BlobDownloads.dataUrlMime(url) ?: mime
+        val name = DownloadNaming.choose(request.contentDisposition, url, mime) { m ->
             MimeTypeMap.getSingleton().getExtensionFromMimeType(m)
         }
+        val size = if (url.startsWith("data:")) -1L else request.contentLength
         AlertDialog.Builder(this)
             .setTitle("下载文件")
-            .setMessage("$name\n${DownloadNaming.formatSize(total)}" + if (tab.isPrivate) "\n\n（无痕模式：文件会保存，但不会出现在下载列表中）" else "")
-            .setPositiveButton("下载") { _, _ -> startDownload(tab, response, name, mime, total) }
-            .setNegativeButton("取消") { _, _ -> runCatching { response.body?.close() } }
-            .setOnCancelListener { runCatching { response.body?.close() } }
+            .setMessage("$name\n${DownloadNaming.formatSize(size)}" + if (tab.isPrivate) "\n\n（无痕模式：文件会保存，但不会出现在下载列表中）" else "")
+            .setPositiveButton("下载") { _, _ ->
+                when {
+                    url.startsWith("data:") -> {
+                        val bytes = BlobDownloads.decodeDataUrl(url) ?: return@setPositiveButton toast("无法读取文件内容")
+                        startDownload(request.copy(inlineBytes = bytes), name, mime, bytes.size.toLong())
+                    }
+                    url.startsWith("blob:") -> {
+                        val view = tab.view ?: return@setPositiveButton toast("页面已关闭，无法下载")
+                        BlobDownloads.fetch(view, url) { bytes, blobMime, error ->
+                            if (bytes == null) {
+                                toast("下载失败：${error ?: "未知错误"}")
+                            } else {
+                                startDownload(request.copy(inlineBytes = bytes), name, blobMime ?: mime, bytes.size.toLong())
+                            }
+                        }
+                    }
+                    url.startsWith("https://") || url.startsWith("http://") -> startDownload(request, name, mime, request.contentLength)
+                    else -> toast("不支持此类下载地址")
+                }
+            }
+            .setNegativeButton("取消", null)
             .show()
     }
 
-    private fun startDownload(tab: Tab, response: WebResponse, name: String, mime: String?, total: Long) {
+    private fun startDownload(request: DownloadRequest, name: String, mime: String?, total: Long) {
         val needed = buildList {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }.toTypedArray()
         requestAndroidPermissions(needed) { granted ->
             if (!granted) {
-                runCatching { response.body?.close() }
                 toast("没有存储权限，无法保存文件")
                 return@requestAndroidPermissions
             }
-            app.downloads.enqueue(response, name, mime, total, tab.isPrivate)
+            app.downloads.enqueue(request, name, mime, total)
             toast("开始下载：$name")
             // 通知权限只影响进度提示，不影响下载本身
             if (Build.VERSION.SDK_INT >= 33 &&
@@ -406,8 +480,42 @@ class MainActivity : ComponentActivity(), UiHost {
         }
     }
 
-    override fun onFullScreen(tab: Tab, fullScreen: Boolean) {
-        if (tab.id == app.tabManager.selectedId.value) setFullscreen(fullScreen)
+    override fun showCustomView(tab: Tab, view: View, callback: WebChromeClient.CustomViewCallback) {
+        if (customViewCallback != null) {
+            callback.onCustomViewHidden(); return
+        }
+        customViewCallback = callback
+        (view.parent as? ViewGroup)?.removeView(view)
+        fullscreenContainer.addView(view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        setFullscreen(true)
+    }
+
+    override fun hideCustomView() {
+        fullscreenContainer.removeAllViews()
+        val cb = customViewCallback
+        customViewCallback = null
+        setFullscreen(false)
+        runCatching { cb?.onCustomViewHidden() }
+    }
+
+    /** 由返回手势退出网页全屏。 */
+    fun exitCustomView() = hideCustomView()
+
+    override fun confirmGoogleSignIn(tab: Tab, url: String) {
+        AlertDialog.Builder(this)
+            .setTitle("Google 登录可能受限")
+            .setMessage(
+                "银耳浏览器使用基于 Chromium 的系统 WebView。Google 的 OAuth 政策不允许在应用内嵌的浏览组件中发起登录，" +
+                    "因此 Google 可能拒绝在这里登录（例如显示 disallowed_useragent）。\n\n" +
+                    "你可以继续尝试；如被拒绝，可改用其它浏览器打开此页面——但在其它浏览器中登录后，登录状态不会带回银耳浏览器。",
+            )
+            .setPositiveButton("继续尝试") { _, _ ->
+                app.prefs.googleSignInNoticeShown = true
+                app.tabManager.ensureView(tab).loadUrl(url)
+            }
+            .setNeutralButton("用其它浏览器打开") { _, _ -> openInOtherBrowser(url) }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     fun openDownload(uri: String, mime: String?) {
