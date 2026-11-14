@@ -50,12 +50,19 @@
 |---|---|---|
 | 仓库自托管 runner | 0 个 | `gh api repos/yinerx/yiner-browser/actions/runners` |
 | 账户类型 | 个人账户（User）。larger runners 只对组织的 GitHub Team / Enterprise Cloud 开放 | `gh api users/yinerx`；https://docs.github.com/en/actions/reference/runners/github-hosted-runners |
-| 公开仓库标准 Linux runner | 4 核、16 GB 内存、**14 GB SSD** | 同上文档；CI 的 “Report runner resources” 步骤会在每次运行时记录实测值 |
+| 公开仓库标准 Linux runner（文档） | 4 核、16 GB 内存、14 GB SSD（文档承诺的值） | 同上文档 |
+| 公开仓库标准 Linux runner（**实测**） | 4 核、15 GB 内存；根分区 145 GB，**可用 86 GB** | CI 运行 43540582061 的 “Report runner resources” 步骤（2026-11-14） |
 | 单个作业时长上限 | 6 小时 | https://docs.github.com/en/actions/reference/limits |
 
-结论：
-- Chromium Android 构建官方要求至少 100 GB 磁盘。仓库现有的免费托管 runner 只有约 14 GB；在 4 核上做完整构建也很可能超过 6 小时的作业上限。
-- 因此本轮**仍然无法**在现有资源上推进完整 Chromium 内核。按要求，没有购买或开通任何付费资源。
+结论（按实测值修正）：
+- **磁盘**：实测可用 86 GB，略低于官方要求的 100 GB。删除 runner 预装的工具链通常能再腾出几十 GB，但本轮**没有验证**能腾出多少。
+- **CPU 与内存**：4 核、15 GB。官方建议 16 GB 以上，链接阶段可能因内存不足失败。
+- **时长**：在 4 核上做完整构建，很可能超过单个作业 6 小时的上限。理论上可以把构建拆成多个作业，并跨作业保存编译缓存来接力，但这种方式**本轮没有验证**，下载约 30 GB 以上的源码也需要很长时间。
+- 因此本轮**仍然无法**确认可以在现有免费资源上完成完整 Chromium 内核的构建。按要求，没有购买或开通任何付费资源，也没有启动大规模下载或构建。
+
+下一步可以做的、可逆的验证（需协调者同意后执行）：
+- 在一个独立的手动触发工作流中，只做“清理磁盘 + 拉取 Chromium 源码（`--no-history`）+ 生成构建配置”，记录磁盘占用和耗时；
+- 不构建、不发布，用来实测“多作业接力”这条路是否可行。
 
 推进所需的额外资源（二选一）：
 - 一台自托管 runner 或构建机：建议 16 核以上、32 GB 以上内存、250 GB 以上 SSD，注册到本仓库；
