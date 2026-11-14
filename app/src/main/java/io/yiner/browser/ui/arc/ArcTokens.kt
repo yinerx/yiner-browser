@@ -1,5 +1,7 @@
 package io.yiner.browser.ui.arc
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -16,48 +18,50 @@ import androidx.compose.ui.unit.sp
 object ArcTokens {
     const val PX_PER_DP = 2.715f
 
-    // ---- 通用色 ----
-    /** 底栏、菜单面板、搜索面板底色。01/02/03：#ECECEE */
-    val PanelGray = Color(0xFFECECEE)
-    /** 底栏上沿分隔线。01：y=2256–2259，#D3D3D5，约 1dp */
-    val BarDivider = Color(0xFFD3D3D5)
-    /** 菜单中“拦截计数”上方分隔线。02：y=2118，#E3E3E5 */
-    val MenuDivider = Color(0xFFE3E3E5)
-    /** 菜单四宫格的格子底色。02：#E0E0E2–#E5E5E7 */
-    val TileGray = Color(0xFFE3E3E5)
-    val TextPrimary = Color(0xFF0D0D0F)
-    /** 次要文字。02 “Problems? …”：#747476 */
-    val TextSecondary = Color(0xFF747476)
-    /** 搜索框占位符。03：#7F7F7F */
-    val Placeholder = Color(0xFF7F7F7F)
-    /** 设置页分组标题。05/06：#686B7E */
-    val SectionHeader = Color(0xFF686B7E)
-    /** 开关开启色。05：#6858FF */
-    val SwitchOn = Color(0xFF6858FF)
-    /** 选中对勾。06：#5C4CD0 */
-    val Check = Color(0xFF5C4CD0)
-    /** 页面菜单遮罩。02：白色网页被压到 #8C8D8F，约 45% 黑 */
-    val MenuScrim = Color.Black.copy(alpha = 0.45f)
+    // ---- 颜色：随浅色 / 深色外观变化，取自当前 [ArcPalette]（浅色值的测量出处见 ArcPalette.Light） ----
+    private val p: ArcPalette @Composable @ReadOnlyComposable get() = LocalArcPalette.current
 
-    /** 搜索面板背后的色调遮罩。03：左 #D8D3E7（淡紫），右 #F8DFE3（淡粉），网页内容仍隐约可见 */
-    val SearchScrim = Brush.horizontalGradient(
-        // 第一版用 #D8D3E7/#F8DFE3 @0.86 太不透明（对照时网页几乎看不见）。
-        // 按白底→#D8D3E7、深色字→约 #746471 反推：不透明度约 0.55，左 #B8AFD3、右 #F2C5CC
-        listOf(Color(0xFFB8AFD3).copy(alpha = 0.55f), Color(0xFFF2C5CC).copy(alpha = 0.55f)),
+    /** 底栏、菜单面板、搜索面板底色（浅色：01/02/03 #ECECEE）。 */
+    val PanelGray: Color @Composable @ReadOnlyComposable get() = p.panel
+    /** 底栏上沿分隔线（浅色：01 #D3D3D5，约 1dp）。 */
+    val BarDivider: Color @Composable @ReadOnlyComposable get() = p.barDivider
+    /** 菜单中“拦截计数”上方分隔线（浅色：02 #E3E3E5）。 */
+    val MenuDivider: Color @Composable @ReadOnlyComposable get() = p.menuDivider
+    /** 菜单四宫格的格子底色（浅色：02）。 */
+    val TileGray: Color @Composable @ReadOnlyComposable get() = p.tile
+    /** 白色胶囊（“+”、地址胶囊、搜索框）。 */
+    val Pill: Color @Composable @ReadOnlyComposable get() = p.pill
+    val TextPrimary: Color @Composable @ReadOnlyComposable get() = p.textPrimary
+    val TextSecondary: Color @Composable @ReadOnlyComposable get() = p.textSecondary
+    /** 搜索框占位符（浅色：03 #7F7F7F）。 */
+    val Placeholder: Color @Composable @ReadOnlyComposable get() = p.placeholder
+    /** 设置页分组标题（浅色：05/06）。 */
+    val SectionHeader: Color @Composable @ReadOnlyComposable get() = p.sectionHeader
+    /** 开关开启色（浅色：05 #6858FF）。 */
+    val SwitchOn: Color @Composable @ReadOnlyComposable get() = p.switchOn
+    /** 选中对勾（浅色：06 #5C4CD0）。 */
+    val Check: Color @Composable @ReadOnlyComposable get() = p.check
+    /** 页面菜单遮罩（浅色：02 约 45% 黑）。 */
+    val MenuScrim: Color @Composable @ReadOnlyComposable get() = p.menuScrim
+
+    /** 搜索面板背后的色调遮罩（浅色：03 反推，不透明度约 0.55，左 #B8AFD3、右 #F2C5CC）。 */
+    val SearchScrim: Brush @Composable @ReadOnlyComposable get() = Brush.horizontalGradient(
+        listOf(p.searchScrimLeft.copy(alpha = p.searchScrimAlpha), p.searchScrimRight.copy(alpha = p.searchScrimAlpha)),
     )
 
-    /** 标签切换背景。04：左上 #BDB5DA、右上 #FECFD7、中部近白、底部 #D6E1FD */
-    val SwitcherBackground = Brush.linearGradient(
-        0.0f to Color(0xFFBDB5DA),
-        0.35f to Color(0xFFF6E6EE),
-        0.55f to Color(0xFFF7F4FA),
-        1.0f to Color(0xFFD6E1FD),
+    /** 标签切换背景（浅色：04 左上 #BDB5DA、右上 #FECFD7、中部近白、底部 #D6E1FD）。 */
+    val SwitcherBackground: Brush @Composable @ReadOnlyComposable get() = Brush.linearGradient(
+        0.0f to p.switcherTopLeft,
+        0.35f to p.switcherUpperMid,
+        0.55f to p.switcherMid,
+        1.0f to p.switcherBottom,
     )
-    val SwitcherTopRight = Color(0xFFFECFD7)
+    val SwitcherTopRight: Color @Composable @ReadOnlyComposable get() = p.switcherTopRight
 
-    /** 设置页背景。05/06：顶部左 #C0BADE、右 #F7E3EC，约到半屏（y≈1300px）过渡为白色 */
-    val SettingsTopLeft = Color(0xFFC0BADE)
-    val SettingsTopRight = Color(0xFFF7E3EC)
+    /** 设置页背景（浅色：05/06 顶部左 #C0BADE、右 #F7E3EC，约到半屏过渡为白色）。 */
+    val SettingsTopLeft: Color @Composable @ReadOnlyComposable get() = p.settingsTopLeft
+    val SettingsTopRight: Color @Composable @ReadOnlyComposable get() = p.settingsTopRight
+    val SettingsBase: Color @Composable @ReadOnlyComposable get() = p.settingsBase
 
     // ---- 网页底栏（01）----
     /** 白色胶囊“+”：x 428–687、y 2297–2439 px → 约 96×52dp */
@@ -122,7 +126,7 @@ object ArcTokens {
     // ---- 设置（05/06）----
     /** 标题约 24sp，#0D1015；返回箭头中心 x≈90 px ≈ 33dp；标题起点 x≈183 px ≈ 67dp */
     val SettingsTitleSize = 24.sp
-    val SettingsTitleColor = Color(0xFF0D1015)
+    val SettingsTitleColor: Color @Composable @ReadOnlyComposable get() = p.settingsTitle
     val SettingsTitleStart = 67.dp
     /** 分组标题约 18sp，左边距 x≈52 px ≈ 19dp */
     val SectionHeaderSize = 18.sp

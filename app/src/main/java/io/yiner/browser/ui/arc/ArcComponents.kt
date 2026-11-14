@@ -62,7 +62,7 @@ import androidx.compose.ui.unit.sp
 import io.yiner.browser.ui.arc.ArcTokens as T
 
 /** 无痕标签的区分色（截图中没有无痕界面证据，这是银耳浏览器自己的设计）。 */
-val PrivateTint = Color(0xFF6E5A9C)
+val PrivateTint: Color @Composable @androidx.compose.runtime.ReadOnlyComposable get() = LocalArcPalette.current.privateTint
 
 // ============================================================ 网页底栏（参考图 01）
 
@@ -124,14 +124,14 @@ private fun MiniCard(bitmap: ImageBitmap?, modifier: Modifier, isPrivate: Boolea
     val shape = RoundedCornerShape(5.dp)
     // 01：两张卡片合计约 49×48dp，单张约 30×37dp
     Box(
-        modifier.size(30.dp, 37.dp).shadow(1.5.dp, shape).clip(shape).background(if (dark) Color(0xFF2B2D33) else Color.White)
-            .border(1.dp, if (isPrivate) PrivateTint else Color(0x22000000), shape),
+        modifier.size(30.dp, 37.dp).shadow(1.5.dp, shape).clip(shape).background(if (dark) LocalArcPalette.current.miniCardBack else LocalArcPalette.current.miniCardFront)
+            .border(1.dp, if (isPrivate) PrivateTint else T.TextPrimary.copy(alpha = 0.13f), shape),
     ) {
         if (bitmap != null) {
             Image(bitmap, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop, alignment = Alignment.TopCenter)
         } else {
             Column(Modifier.padding(4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                repeat(4) { Box(Modifier.fillMaxWidth(if (it == 3) 0.6f else 1f).height(2.dp).background(Color(0xFFCFCFD3))) }
+                repeat(4) { Box(Modifier.fillMaxWidth(if (it == 3) 0.6f else 1f).height(2.dp).background(LocalArcPalette.current.miniCardLine)) }
             }
         }
     }
@@ -140,7 +140,7 @@ private fun MiniCard(bitmap: ImageBitmap?, modifier: Modifier, isPrivate: Boolea
 @Composable
 fun WhitePill(width: Dp, height: Dp, onClick: () -> Unit, content: @Composable BoxScope.() -> Unit) {
     Box(
-        Modifier.size(width, height).clip(CircleShape).background(Color.White).clickable(onClick = onClick),
+        Modifier.size(width, height).clip(CircleShape).background(T.Pill).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
         content = content,
     )
@@ -177,7 +177,7 @@ fun AddressPill(
 ) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = T.SheetHPadding).height(T.AddressPillHeight)
-            .clip(CircleShape).background(Color.White),
+            .clip(CircleShape).background(T.Pill),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         PillIcon(ArcIcons.ChevronLeft, "后退", canGoBack, onBack)
@@ -264,7 +264,7 @@ fun SearchPill(
 ) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = T.SheetHPadding).height(T.SearchPillHeight)
-            .clip(CircleShape).background(Color.White).padding(start = 24.dp, end = 12.dp),
+            .clip(CircleShape).background(T.Pill).padding(start = 24.dp, end = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
@@ -275,7 +275,7 @@ fun SearchPill(
                 modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
                 singleLine = true,
                 textStyle = TextStyle(fontSize = T.SearchTextSize, color = T.TextPrimary),
-                cursorBrush = SolidColor(Color(0xFF3A5BFF)),
+                cursorBrush = SolidColor(LocalArcPalette.current.cursor),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go, autoCorrectEnabled = false),
                 keyboardActions = KeyboardActions(onGo = { onGo() }),
             )
@@ -289,8 +289,17 @@ fun SearchPill(
 fun SiteBadge(label: String, size: Dp, isPrivate: Boolean = false, white: Boolean = false) {
     val letter = label.trim().firstOrNull { it.isLetterOrDigit() }?.uppercaseChar() ?: '·'
     val hue = (label.lowercase().hashCode().let { if (it < 0) -it else it } % 360).toFloat()
-    val bg = if (white) Color.White else Color.hsl(hue, 0.45f, 0.88f)
-    val fg = if (isPrivate) PrivateTint else Color.hsl(hue, 0.55f, 0.32f)
+    val dark = LocalArcPalette.current.isDark
+    val bg = when {
+        white -> T.Pill
+        dark -> Color.hsl(hue, 0.30f, 0.24f)
+        else -> Color.hsl(hue, 0.45f, 0.88f)
+    }
+    val fg = when {
+        isPrivate -> PrivateTint
+        dark -> Color.hsl(hue, 0.60f, 0.80f)
+        else -> Color.hsl(hue, 0.55f, 0.32f)
+    }
     Box(
         Modifier.size(size).clip(RoundedCornerShape(size * 0.22f)).background(bg),
         contentAlignment = Alignment.Center,
@@ -334,7 +343,7 @@ fun CardTitle(title: String, host: String, isPrivate: Boolean, modifier: Modifie
             Text("无痕 ", fontSize = T.CardTitleSize, color = PrivateTint, fontWeight = FontWeight.SemiBold)
         }
         Text(
-            title, fontSize = T.CardTitleSize, color = Color(0xFF3B2F40).copy(alpha = 0.7f),
+            title, fontSize = T.CardTitleSize, color = LocalArcPalette.current.cardTitle,
             maxLines = 1, overflow = TextOverflow.Ellipsis,
         )
     }
@@ -346,8 +355,15 @@ fun TabCardBody(thumbnail: ImageBitmap?, title: String, host: String, isPrivate:
     val shape = RoundedCornerShape(T.CardCorner)
     Box(
         modifier.shadow(6.dp, shape, ambientColor = Color(0x33000000), spotColor = Color(0x33000000))
-            .clip(shape).background(Color.White)
-            .then(if (isPrivate) Modifier.border(2.dp, PrivateTint, shape) else Modifier),
+            .clip(shape).background(LocalArcPalette.current.cardSurface)
+            .then(
+                when {
+                    isPrivate -> Modifier.border(2.dp, PrivateTint, shape)
+                    // 深色下卡片与背景亮度接近，加一圈淡描边勾出轮廓
+                    LocalArcPalette.current.isDark -> Modifier.border(1.dp, Color.White.copy(alpha = 0.10f), shape)
+                    else -> Modifier
+                },
+            ),
     ) {
         if (thumbnail != null) {
             Image(thumbnail, title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop, alignment = Alignment.TopCenter)
@@ -386,14 +402,6 @@ fun SwitcherBottomRow(onPlus: () -> Unit, onSettings: () -> Unit, leading: @Comp
 
 // ============================================================ 设置（05、06）
 
-/** 设置页背景：顶部淡紫→淡粉，约半屏后过渡为白色（05/06）。 */
-val SettingsBackground: Brush
-    get() = Brush.verticalGradient(
-        0f to Color(0xFFDCD6EE),
-        0.5f to Color.White,
-        1f to Color.White,
-    )
-
 /**
  * 底部胶囊下方的留白：手势导航（导航栏不高于 32dp）时按参考图固定 16dp，让胶囊贴近手势条；
  * 三键导航时让出完整的导航栏高度，避免与系统按键重叠。
@@ -406,12 +414,12 @@ fun bottomGap(): Dp {
 
 @Composable
 fun SettingsScaffold(title: String, onBack: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
-    Box(Modifier.fillMaxSize().background(Color.White)) {
+    Box(Modifier.fillMaxSize().background(T.SettingsBase)) {
         // 两层渐变叠加：上半屏左紫右粉，向下淡出为白色。两层高度必须一致，否则会出现接缝（第一版的问题）
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.6f)) {
             Box(
                 Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(T.SettingsTopLeft, T.SettingsTopRight)))
-                    .background(Brush.verticalGradient(0f to Color.Transparent, 0.15f to Color.Transparent, 1f to Color.White)),
+                    .background(Brush.verticalGradient(0f to Color.Transparent, 0.15f to Color.Transparent, 1f to T.SettingsBase)),
             )
         }
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
@@ -471,7 +479,8 @@ fun ArcSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
         checked = checked, onCheckedChange = onChange,
         colors = SwitchDefaults.colors(
             checkedTrackColor = T.SwitchOn, checkedThumbColor = Color.White, checkedBorderColor = T.SwitchOn,
-            uncheckedTrackColor = Color(0xFFE4E3EA), uncheckedThumbColor = Color(0xFF8E8C99),
+            uncheckedTrackColor = LocalArcPalette.current.switchOffTrack, uncheckedThumbColor = LocalArcPalette.current.switchOffThumb,
+            uncheckedBorderColor = LocalArcPalette.current.switchOffThumb,
         ),
     )
 }

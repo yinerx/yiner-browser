@@ -17,11 +17,17 @@ import android.webkit.MimeTypeMap
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.graphics.toArgb
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
+import androidx.core.graphics.drawable.toDrawable
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -105,6 +111,10 @@ class MainActivity : ComponentActivity(), UiHost {
         fullscreenContainer = FrameLayout(this).apply { setBackgroundColor(android.graphics.Color.BLACK) }
         app.blocker // 尽早在后台加载过滤规则
         val tm = app.tabManager
+        // 先确定外观，再创建任何 WebView（网页的 prefers-color-scheme 取自创建时的主题）
+        resolvedDark = app.prefs.settings.value.themeMode.isDark(systemIsDark())
+        tm.setDarkTheme(resolvedDark, rebuild = false)
+        applySystemBars(resolvedDark)
         tm.attachActivity(this)
         tm.uiHost = this
         tm.onTabOpenedByPage = { showBrowser() }
@@ -112,7 +122,14 @@ class MainActivity : ComponentActivity(), UiHost {
         tm.runAutoArchive()
         if (tm.selectedTab != null) ui.screen = Screen.BROWSER
 
-        setContent { YinerTheme { BrowserApp(this) } }
+        setContent {
+            val settings by app.prefs.settings.collectAsState()
+            // 跟随系统：读取 Compose 的系统外观（本 Activity 自行处理 uiMode 变化，系统切换时立即重组）；
+            // 手动选择浅色/深色时不受系统影响
+            val dark = settings.themeMode.isDark(isSystemInDarkTheme())
+            LaunchedEffect(dark) { onAppearanceChanged(dark) }
+            YinerTheme(dark) { BrowserApp(this) }
+        }
 
         if (savedInstanceState == null) handleIntent(intent, coldStart = true)
         app.updates.onAppStart()
@@ -129,7 +146,7 @@ class MainActivity : ComponentActivity(), UiHost {
         val hadOldEngineData = File(filesDir, "mozilla").exists() || app.tabManager.tabs.value.isNotEmpty()
         prefs.webViewMigrationNoticeShown = true
         if (!hadOldEngineData) return
-        AlertDialog.Builder(this)
+        AlertDialog.Builder(this, dialogTheme)
             .setTitle("浏览器内核已更换")
             .setMessage(
                 "银耳浏览器已改用基于 Chromium 的系统 WebView。\n\n" +
@@ -215,6 +232,40 @@ class MainActivity : ComponentActivity(), UiHost {
                 }
             }
         }
+    }
+
+    /** 当前实际外观（供原生对话框、系统栏、WebView 使用）。 */
+    var resolvedDark = false
+        private set
+
+    override val dialogTheme: Int
+        get() = if (resolvedDark) android.R.style.Theme_Material_Dialog_Alert else android.R.style.Theme_Material_Light_Dialog_Alert
+
+    private fun systemIsDark() =
+        (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+
+    private fun onAppearanceChanged(dark: Boolean) {
+        resolvedDark = dark
+        applySystemBars(dark)
+        app.tabManager.setDarkTheme(dark)
+    }
+
+    /** 状态栏、导航栏图标颜色与窗口底色随外观变化（边到边，系统栏透明）。 */
+    private fun applySystemBars(dark: Boolean) {
+        val transparent = android.graphics.Color.TRANSPARENT
+        val style = if (dark) {
+            androidx.activity.SystemBarStyle.dark(transparent)
+        } else {
+            androidx.activity.SystemBarStyle.light(transparent, transparent)
+        }
+        enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+        val palette = if (dark) io.yiner.browser.ui.arc.ArcPalette.Dark else io.yiner.browser.ui.arc.ArcPalette.Light
+        window.setBackgroundDrawable(palette.window.toArgb().toDrawable())
+    }
+
+    fun setThemeMode(mode: io.yiner.browser.core.ThemeMode) {
+        app.prefs.update { it.copy(themeMode = mode) }
     }
 
     fun showBrowser() {
@@ -385,7 +436,7 @@ class MainActivity : ComponentActivity(), UiHost {
     override fun confirmExternalLink(tab: Tab, uri: String) {
         if (externalDialogShowing) return
         externalDialogShowing = true
-        AlertDialog.Builder(this)
+        AlertDialog.Builder(this, dialogTheme)
             .setTitle("打开其它应用？")
             .setMessage(LinkPolicy.describe(uri))
             .setPositiveButton("打开") { _, _ -> launchExternal(tab, uri) }
@@ -433,7 +484,7 @@ class MainActivity : ComponentActivity(), UiHost {
             MimeTypeMap.getSingleton().getExtensionFromMimeType(m)
         }
         val size = if (url.startsWith("data:")) -1L else request.contentLength
-        AlertDialog.Builder(this)
+        AlertDialog.Builder(this, dialogTheme)
             .setTitle("下载文件")
             .setMessage("$name\n${DownloadNaming.formatSize(size)}" + if (tab.isPrivate) "\n\n（无痕模式：文件会保存，但不会出现在下载列表中）" else "")
             .setPositiveButton("下载") { _, _ ->
@@ -502,7 +553,7 @@ class MainActivity : ComponentActivity(), UiHost {
     fun exitCustomView() = hideCustomView()
 
     override fun confirmGoogleSignIn(tab: Tab, url: String) {
-        AlertDialog.Builder(this)
+        AlertDialog.Builder(this, dialogTheme)
             .setTitle("Google 登录可能受限")
             .setMessage(
                 "银耳浏览器使用基于 Chromium 的系统 WebView。Google 的 OAuth 政策不允许在应用内嵌的浏览组件中发起登录，" +

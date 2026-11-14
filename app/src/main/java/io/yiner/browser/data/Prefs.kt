@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.core.content.edit
 import io.yiner.browser.core.ArchiveAfter
 import io.yiner.browser.core.SearchEngine
+import io.yiner.browser.core.ThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,6 +26,8 @@ data class Settings(
     val autoOpenKeyboard: Boolean = true,
     /** 网页文字缩放（百分比，WebView textZoom）。 */
     val textZoomPercent: Int = 100,
+    /** 外观：跟随系统（默认）/ 浅色 / 深色。 */
+    val themeMode: ThemeMode = ThemeMode.DEFAULT,
 )
 
 /** SharedPreferences 封装，同时暴露为 StateFlow 供界面观察。 */
@@ -43,6 +46,7 @@ class Prefs(context: Context) {
         httpsOnly = sp.getBoolean("https_only", false),
         autoOpenKeyboard = sp.getBoolean("auto_open_keyboard", true),
         textZoomPercent = sp.getInt("text_zoom", 100),
+        themeMode = ThemeMode.fromId(sp.getString("theme_mode", null)),
     )
 
     fun update(transform: (Settings) -> Settings) {
@@ -57,6 +61,7 @@ class Prefs(context: Context) {
             putBoolean("https_only", s.httpsOnly)
             putBoolean("auto_open_keyboard", s.autoOpenKeyboard)
             putInt("text_zoom", s.textZoomPercent)
+            putString("theme_mode", s.themeMode.id)
         }
         _settings.value = s
     }

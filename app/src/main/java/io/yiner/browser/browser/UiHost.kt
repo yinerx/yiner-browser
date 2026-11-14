@@ -27,6 +27,9 @@ data class DownloadRequest(
 interface UiHost {
     val activity: Activity
 
+    /** 原生对话框使用的主题（随浅色 / 深色外观）。 */
+    val dialogTheme: Int
+
     fun requestAndroidPermissions(permissions: Array<String>, onResult: (allGranted: Boolean) -> Unit)
 
     /** 打开系统文件选择器；用户取消时回调空列表。 */

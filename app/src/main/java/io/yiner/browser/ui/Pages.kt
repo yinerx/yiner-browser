@@ -109,6 +109,7 @@ fun SettingsPage(activity: MainActivity) {
             versionName = BuildConfig.VERSION_NAME,
             engineDescription = "内核：基于 Chromium 的系统 WebView（${TabManager.webViewPackageDescription(activity)}）· 个人自用的独立项目",
             oldEngineDataLabel = oldEngineBytes?.let { DownloadNaming.formatSize(it) },
+            themeLabel = settings.themeMode.label,
         ),
         onBack = { ui.closeTopOverlay() },
         onOpen = { t ->
@@ -123,6 +124,7 @@ fun SettingsPage(activity: MainActivity) {
                 SettingsTarget.HISTORY -> ui.openPage(Screen.HISTORY)
                 SettingsTarget.LICENSES -> showLicenses = true
                 SettingsTarget.OLD_ENGINE_DATA -> showOldEngine = true
+                SettingsTarget.APPEARANCE -> ui.openPage(Screen.APPEARANCE)
             }
         },
         onAutoOpenKeyboard = { v -> activity.updateSettings { it.copy(autoOpenKeyboard = v) } },
@@ -459,4 +461,12 @@ private fun ClearDataDialog(activity: MainActivity, onDismiss: () -> Unit) {
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
+}
+
+// ---------------------------------------------------------------------------- 外观
+
+@Composable
+fun AppearancePage(activity: MainActivity) {
+    val settings by activity.app.prefs.settings.collectAsState()
+    AppearanceContent(settings.themeMode, onSelect = { activity.setThemeMode(it) }, onBack = { activity.ui.closeTopOverlay() })
 }

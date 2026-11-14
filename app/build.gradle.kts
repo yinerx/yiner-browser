@@ -48,6 +48,8 @@ android {
         debug {
             // 测试包与正式版并存安装：不同包名、名称带“测试版”，不会覆盖或要求卸载正式版
             applicationIdSuffix = ".debug"
+            // 版本号与正式版相同（versionCode 2）：可覆盖安装此前交付的 WebView 测试版；名称后缀便于区分
+            versionNameSuffix = "-test"
             resValue("string", "app_name", "银耳浏览器 测试版")
         }
         release {

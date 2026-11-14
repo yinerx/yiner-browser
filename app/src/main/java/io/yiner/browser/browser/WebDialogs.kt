@@ -25,7 +25,7 @@ class WebDialogs(private val hostProvider: () -> UiHost?) {
 
     private fun builder(title: String?): AlertDialog.Builder? {
         val host = hostProvider() ?: return null
-        return AlertDialog.Builder(host.activity).apply { if (!title.isNullOrBlank()) setTitle(title) }
+        return AlertDialog.Builder(host.activity, host.dialogTheme).apply { if (!title.isNullOrBlank()) setTitle(title) }
     }
 
     private fun site(url: String?) = UrlInput.displayHost(url.orEmpty()).ifBlank { "此网页" }
@@ -49,7 +49,7 @@ class WebDialogs(private val hostProvider: () -> UiHost?) {
     fun prompt(url: String?, message: String?, default: String?, result: JsPromptResult): Boolean {
         val host = hostProvider() ?: run { result.cancel(); return true }
         val input = EditText(host.activity).apply { setText(default.orEmpty()); setSingleLine() }
-        AlertDialog.Builder(host.activity).setTitle(site(url)).setMessage(message).setView(padded(input))
+        AlertDialog.Builder(host.activity, host.dialogTheme).setTitle(site(url)).setMessage(message).setView(padded(input))
             .setPositiveButton("确定") { _, _ -> result.confirm(input.text.toString()) }
             .setNegativeButton("取消") { _, _ -> result.cancel() }
             .setOnCancelListener { result.cancel() }.show()
@@ -72,7 +72,7 @@ class WebDialogs(private val hostProvider: () -> UiHost?) {
             hint = "密码"; setSingleLine(); inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
         }
         val box = LinearLayout(h.activity).apply { orientation = LinearLayout.VERTICAL; addView(user); addView(pass) }
-        AlertDialog.Builder(h.activity).setTitle("需要登录").setMessage("${host.orEmpty()} ${realm.orEmpty()}").setView(padded(box))
+        AlertDialog.Builder(h.activity, h.dialogTheme).setTitle("需要登录").setMessage("${host.orEmpty()} ${realm.orEmpty()}").setView(padded(box))
             .setPositiveButton("登录") { _, _ -> handler.proceed(user.text.toString(), pass.text.toString()) }
             .setNegativeButton("取消") { _, _ -> handler.cancel() }
             .setOnCancelListener { handler.cancel() }.show()
@@ -99,7 +99,7 @@ class WebDialogs(private val hostProvider: () -> UiHost?) {
             if (PermissionRequest.RESOURCE_VIDEO_CAPTURE in wanted) add(Manifest.permission.CAMERA)
             if (PermissionRequest.RESOURCE_AUDIO_CAPTURE in wanted) add(Manifest.permission.RECORD_AUDIO)
         }
-        AlertDialog.Builder(host.activity).setTitle("权限请求")
+        AlertDialog.Builder(host.activity, host.dialogTheme).setTitle("权限请求")
             .setMessage("${site(request.origin.toString())} 想使用：$what")
             .setPositiveButton("允许") { _, _ ->
                 if (android.isEmpty()) {
@@ -117,7 +117,7 @@ class WebDialogs(private val hostProvider: () -> UiHost?) {
     /** 定位：每次询问，不记住选择（retain = false）。 */
     fun geolocation(origin: String, callback: GeolocationPermissions.Callback) {
         val host = hostProvider() ?: run { callback.invoke(origin, false, false); return }
-        AlertDialog.Builder(host.activity).setTitle("权限请求").setMessage("${site(origin)} 想获取你的位置")
+        AlertDialog.Builder(host.activity, host.dialogTheme).setTitle("权限请求").setMessage("${site(origin)} 想获取你的位置")
             .setPositiveButton("允许") { _, _ ->
                 host.requestAndroidPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) { ok ->
                     callback.invoke(origin, ok, false)
@@ -144,7 +144,7 @@ class WebDialogs(private val hostProvider: () -> UiHost?) {
         fun camera() = host.capturePhoto { uri -> finish(listOfNotNull(uri)) }
         when {
             wantsImage && params.isCaptureEnabled -> camera()
-            wantsImage -> AlertDialog.Builder(host.activity).setTitle("上传图片")
+            wantsImage -> AlertDialog.Builder(host.activity, host.dialogTheme).setTitle("上传图片")
                 .setItems(arrayOf("拍照", "从文件中选择")) { _, which -> if (which == 0) camera() else files() }
                 .setOnCancelListener { finish(emptyList()) }.show()
             else -> files()

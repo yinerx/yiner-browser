@@ -193,7 +193,7 @@ fun FindBar(tab: Tab, onClose: () -> Unit) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(ArcTokens.BarDivider))
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Row(
-                Modifier.weight(1f).height(48.dp).clip(CircleShape).background(Color.White).padding(horizontal = 18.dp),
+                Modifier.weight(1f).height(48.dp).clip(CircleShape).background(ArcTokens.Pill).padding(horizontal = 18.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(Modifier.weight(1f)) {

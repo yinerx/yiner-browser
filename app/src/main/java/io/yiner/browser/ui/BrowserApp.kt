@@ -91,7 +91,7 @@ fun BrowserApp(activity: MainActivity) {
         }
     }
 
-    Box(Modifier.fillMaxSize().background(Color.White)) {
+    Box(Modifier.fillMaxSize().background(io.yiner.browser.ui.arc.LocalArcPalette.current.window)) {
         // 浏览界面（01）：网页占满主体，底部是轻薄工具栏；网页容器始终保留在界面树里
         Column(
             Modifier.fillMaxSize()
@@ -128,6 +128,7 @@ fun BrowserApp(activity: MainActivity) {
             Screen.SEARCH_ENGINES -> SearchEnginesPage(activity)
             Screen.SITE_SETTINGS_GLOBAL -> GlobalSiteSettingsPage(activity)
             Screen.ARCHIVE_AFTER -> ArchiveAfterPage(activity)
+            Screen.APPEARANCE -> AppearancePage(activity)
             Screen.HISTORY -> HistoryPage(activity)
             Screen.DOWNLOADS -> DownloadsPage(activity)
             Screen.ARCHIVED -> ArchivedPage(activity)

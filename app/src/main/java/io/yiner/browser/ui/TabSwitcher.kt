@@ -61,11 +61,12 @@ data class TabCardModel(
 @Composable
 fun SwitcherBackdrop(modifier: Modifier = Modifier) {
     // 第一版用 320dp 高的横向渐变叠加，对照时右侧出现明显断边；改为以右上角为圆心的径向渐变
+    val topRight = ArcTokens.SwitcherTopRight
     Box(
         modifier.fillMaxSize().background(ArcTokens.SwitcherBackground).drawBehind {
             drawRect(
                 Brush.radialGradient(
-                    listOf(ArcTokens.SwitcherTopRight.copy(alpha = 0.85f), Color.Transparent),
+                    listOf(topRight.copy(alpha = 0.85f), Color.Transparent),
                     center = Offset(size.width, 0f), radius = size.width * 1.15f,
                 ),
             )

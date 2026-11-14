@@ -56,37 +56,45 @@ class UiScreenshotTest {
         outDir.mkdirs()
     }
 
-    private fun shot(name: String, content: @Composable () -> Unit) {
-        compose.setContent { content() }
+    private fun shot(name: String, dark: Boolean, content: @Composable () -> Unit) {
+        compose.setContent { YinerTheme(dark) { content() } }
         compose.waitForIdle()
-        compose.onRoot().captureRoboImage(File(outDir, "$name.png").absolutePath)
+        compose.onRoot().captureRoboImage(File(outDir, "$name-${if (dark) "dark" else "light"}.png").absolutePath)
     }
 
-    /** 占位网页：白底、几段正文。 */
+    /** 占位网页：几段正文。深色时模拟一个支持 prefers-color-scheme 的网站。 */
     @Composable
     private fun FakePage() {
-        Column(Modifier.fillMaxSize().background(Color.White).padding(horizontal = 16.dp, vertical = 40.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Text("示例网页标题：银耳浏览器界面渲染", fontSize = 30.sp, lineHeight = 38.sp, color = Color(0xFF222222))
+        val dark = io.yiner.browser.ui.arc.LocalArcPalette.current.isDark
+        val body = if (dark) Color(0xFFD6D6DA) else Color(0xFF333333)
+        Column(Modifier.fillMaxSize().background(if (dark) Color(0xFF202124) else Color.White).padding(horizontal = 16.dp, vertical = 40.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text("示例网页标题：银耳浏览器界面渲染", fontSize = 30.sp, lineHeight = 38.sp, color = if (dark) Color(0xFFF1F1F3) else Color(0xFF222222))
             repeat(3) {
                 Text(
                     "这是一段用于界面对照的占位正文。网页内容在浏览时占满屏幕主体，底部只保留轻薄的工具栏；" +
                         "常用操作集中在向上展开的菜单面板中。",
-                    fontSize = 22.sp, lineHeight = 34.sp, color = Color(0xFF333333),
+                    fontSize = 22.sp, lineHeight = 34.sp, color = body,
                 )
             }
         }
     }
 
-    @Test
-    fun s01_webpageBottomBar() = shot("01-webpage-bottom-bar") {
+    @Test fun s01_webpageBottomBar_light() = s01_webpageBottomBar(false)
+
+    @Test fun s01_webpageBottomBar_dark() = s01_webpageBottomBar(true)
+
+    private fun s01_webpageBottomBar(dark: Boolean) = shot("01-webpage-bottom-bar", dark) {
         Column(Modifier.fillMaxSize()) {
             Box(Modifier.weight(1f)) { FakePage() }
             ArcBottomBar(null, null, tabCount = 2, isPrivate = false, progress = null, onTabs = {}, onPlus = {}, onExpand = {})
         }
     }
 
-    @Test
-    fun s02_expandedMenu() = shot("02-expanded-address-menu") {
+    @Test fun s02_expandedMenu_light() = s02_expandedMenu(false)
+
+    @Test fun s02_expandedMenu_dark() = s02_expandedMenu(true)
+
+    private fun s02_expandedMenu(dark: Boolean) = shot("02-expanded-address-menu", dark) {
         Box(Modifier.fillMaxSize()) {
             FakePage()
             Box(Modifier.fillMaxSize().background(ArcTokens.MenuScrim))
@@ -102,8 +110,11 @@ class UiScreenshotTest {
         }
     }
 
-    @Test
-    fun s03_searchPanel() = shot("03-search-keyboard") {
+    @Test fun s03_searchPanel_light() = s03_searchPanel(false)
+
+    @Test fun s03_searchPanel_dark() = s03_searchPanel(true)
+
+    private fun s03_searchPanel(dark: Boolean) = shot("03-search-keyboard", dark) {
         Box(Modifier.fillMaxSize()) {
             FakePage()
             SearchPanelContent(
@@ -118,8 +129,11 @@ class UiScreenshotTest {
         }
     }
 
-    @Test
-    fun s04_tabSwitcher() = shot("04-tab-switcher") {
+    @Test fun s04_tabSwitcher_light() = s04_tabSwitcher(false)
+
+    @Test fun s04_tabSwitcher_dark() = s04_tabSwitcher(true)
+
+    private fun s04_tabSwitcher(dark: Boolean) = shot("04-tab-switcher", dark) {
         TabSwitcherContent(
             cards = listOf(
                 TabCardModel("a", "示例新闻：热带风暴带来的影响", "news.example.com", false, null),
@@ -130,8 +144,11 @@ class UiScreenshotTest {
         )
     }
 
-    @Test
-    fun s05_appSettings() = shot("05-app-settings") {
+    @Test fun s05_appSettings_light() = s05_appSettings(false)
+
+    @Test fun s05_appSettings_dark() = s05_appSettings(true)
+
+    private fun s05_appSettings(dark: Boolean) = shot("05-app-settings", dark) {
         AppSettingsContent(
             AppSettingsModel(
                 isDefaultBrowser = false, searchEngineLabel = "Google", archiveLabel = "1 天后",
@@ -142,8 +159,19 @@ class UiScreenshotTest {
         )
     }
 
-    @Test
-    fun s06_searchEngines() = shot("06-search-engines") {
+    @Test fun s06_searchEngines_light() = s06_searchEngines(false)
+
+    @Test fun s06_searchEngines_dark() = s06_searchEngines(true)
+
+    private fun s06_searchEngines(dark: Boolean) = shot("06-search-engines", dark) {
         SearchEnginesContent(listOf("Google", "Bing", "DuckDuckGo", "百度"), selected = 0, onSelect = {}, onBack = {})
+    }
+
+    @Test fun s07_appearance_light() = s07_appearance(false)
+
+    @Test fun s07_appearance_dark() = s07_appearance(true)
+
+    private fun s07_appearance(dark: Boolean) = shot("07-appearance", dark) {
+        AppearanceContent(if (dark) io.yiner.browser.core.ThemeMode.DARK else io.yiner.browser.core.ThemeMode.SYSTEM, onSelect = {}, onBack = {})
     }
 }

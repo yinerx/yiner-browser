@@ -42,7 +42,7 @@ object UpdateInstaller {
             Toast.makeText(activity, "没有可安装的更新", Toast.LENGTH_SHORT).show(); return
         }
         if (!activity.packageManager.canRequestPackageInstalls()) {
-            AlertDialog.Builder(activity)
+            AlertDialog.Builder(activity, (activity as? io.yiner.browser.browser.UiHost)?.dialogTheme ?: 0)
                 .setTitle("需要允许安装应用")
                 .setMessage("为了安装更新，请在接下来的系统设置中允许“银耳浏览器”安装未知应用，然后返回并再次点按“安装”。\n\n这一许可只用于安装银耳浏览器自己的更新包。")
                 .setPositiveButton("去设置") { _, _ ->

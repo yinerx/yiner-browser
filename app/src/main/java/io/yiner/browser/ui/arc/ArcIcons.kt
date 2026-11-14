@@ -147,4 +147,26 @@ object ArcIcons {
     }
     val Info = icon("info") { circle(12f, 12f, 8.5f); moveTo(12f, 11f); lineTo(12f, 16.5f); moveTo(12f, 7.6f); lineTo(12f, 7.8f) }
     val Lock = icon("lock") { roundRect(5f, 10.5f, 19f, 20f, 2f); moveTo(8f, 10.5f); lineTo(8f, 7.5f); arcTo(4f, 4f, 0f, false, true, 16f, 7.5f); lineTo(16f, 10.5f) }
+    /** 外观：半明半暗的圆（跟随系统）。 */
+    val ThemeAuto = icon("theme_auto") {
+        circle(12f, 12f, 8f)
+        moveTo(12f, 4f); lineTo(12f, 20f)
+        moveTo(12f, 7f); lineTo(16f, 7f); moveTo(12f, 10f); lineTo(19f, 10f); moveTo(12f, 13f); lineTo(19.5f, 13f); moveTo(12f, 16f); lineTo(17.5f, 16f)
+    }
+    /** 浅色：太阳。 */
+    val Sun = icon("sun") {
+        circle(12f, 12f, 4f)
+        for (i in 0 until 8) {
+            val a = Math.toRadians(i * 45.0)
+            moveTo(12f + 6.5f * kotlin.math.cos(a).toFloat(), 12f + 6.5f * kotlin.math.sin(a).toFloat())
+            lineTo(12f + 9f * kotlin.math.cos(a).toFloat(), 12f + 9f * kotlin.math.sin(a).toFloat())
+        }
+    }
+    /** 深色：月牙。 */
+    val Moon = icon("moon") {
+        moveTo(19.5f, 14.5f)
+        arcTo(8f, 8f, 0f, true, true, 9.5f, 4.5f)
+        arcTo(6.5f, 6.5f, 0f, false, false, 19.5f, 14.5f)
+        close()
+    }
 }

@@ -1,10 +1,12 @@
 package io.yiner.browser.ui
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import io.yiner.browser.ui.arc.ArcPalette
+import io.yiner.browser.ui.arc.LocalArcPalette
 import androidx.compose.ui.graphics.Color
 
 /** 银耳配色：象牙白底 + 琥珀金点缀；无痕模式使用深紫灰。 */
@@ -42,9 +44,13 @@ private val Dark = darkColorScheme(
     outline = Color(0xFF5A4F41),
 )
 
-val PrivateAccent = Color(0xFF6E5A9C)
-
+/**
+ * 应用主题。[dark] 由设置中的外观（跟随系统 / 浅色 / 深色）与系统当前外观共同决定，
+ * 同时提供 Material 配色（对话框、按钮等）与 Arc 风格界面色板 [ArcPalette]。
+ */
 @Composable
-fun YinerTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) Dark else Light, content = content)
+fun YinerTheme(dark: Boolean, content: @Composable () -> Unit) {
+    MaterialTheme(colorScheme = if (dark) Dark else Light) {
+        CompositionLocalProvider(LocalArcPalette provides if (dark) ArcPalette.Dark else ArcPalette.Light, content = content)
+    }
 }

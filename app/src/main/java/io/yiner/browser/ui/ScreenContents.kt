@@ -255,11 +255,13 @@ data class AppSettingsModel(
     val searchSuggestions: Boolean,
     val versionName: String,
     val engineDescription: String,
+    /** 外观的当前选择（跟随系统 / 浅色 / 深色）。 */
+    val themeLabel: String = "跟随系统",
     /** 旧内核（GeckoView）遗留数据的大小；为 null 表示没有遗留数据，不显示该项。 */
     val oldEngineDataLabel: String? = null,
 )
 
-enum class SettingsTarget { GLOBAL_SITE, DEFAULT_BROWSER, SEARCH_ENGINES, ARCHIVED, ARCHIVE_AFTER, CLEAR_DATA, DOWNLOADS, HISTORY, LICENSES, OLD_ENGINE_DATA }
+enum class SettingsTarget { GLOBAL_SITE, DEFAULT_BROWSER, SEARCH_ENGINES, ARCHIVED, ARCHIVE_AFTER, CLEAR_DATA, DOWNLOADS, HISTORY, LICENSES, OLD_ENGINE_DATA, APPEARANCE }
 
 @Composable
 fun AppSettingsContent(
@@ -296,6 +298,7 @@ fun AppSettingsContent(
             }
 
             SectionHeader("选项")
+            SettingsRow(ArcIcons.ThemeAuto, "外观", subtitle = m.themeLabel) { onOpen(SettingsTarget.APPEARANCE) }
             SettingsRow(ArcIcons.Keyboard, "自动弹出键盘", subtitle = "打开应用时直接显示搜索面板", trailing = {
                 ArcSwitch(m.autoOpenKeyboard, onAutoOpenKeyboard)
             })
@@ -324,6 +327,31 @@ fun SearchEnginesContent(labels: List<String>, selected: Int, onSelect: (Int) ->
             labels.forEachIndexed { i, label ->
                 ChoiceRow(label, selected == i, onClick = { onSelect(i) }) { SiteBadge(label, ArcTokens.EngineIcon) }
             }
+        }
+    }
+}
+
+// ============================================================ 外观（与 06 搜索引擎页同样的单选列表样式）
+
+@Composable
+fun AppearanceContent(selected: io.yiner.browser.core.ThemeMode, onSelect: (io.yiner.browser.core.ThemeMode) -> Unit, onBack: () -> Unit) {
+    SettingsScaffold("外观", onBack = onBack) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            SectionHeader("主题")
+            io.yiner.browser.core.ThemeMode.entries.forEach { mode ->
+                val icon = when (mode) {
+                    io.yiner.browser.core.ThemeMode.SYSTEM -> ArcIcons.ThemeAuto
+                    io.yiner.browser.core.ThemeMode.LIGHT -> ArcIcons.Sun
+                    io.yiner.browser.core.ThemeMode.DARK -> ArcIcons.Moon
+                }
+                ChoiceRow(mode.label, selected == mode, onClick = { onSelect(mode) }) {
+                    Icon(icon, null, Modifier.size(ArcTokens.EngineIcon * 0.8f), tint = ArcTokens.TextPrimary)
+                }
+            }
+            io.yiner.browser.ui.arc.SettingsNote(
+                "“跟随系统”时随手机的浅色/深色设置即时切换；选择浅色或深色后不再跟随系统。" +
+                    "网页按其自身的深色样式（prefers-color-scheme）显示，没有深色样式的网页保持原样，不做反色；切换外观时已打开的网页会重新加载。",
+            )
         }
     }
 }

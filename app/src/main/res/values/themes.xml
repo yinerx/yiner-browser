@@ -7,4 +7,10 @@
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">true</item>
     </style>
+    <!--
+      WebView 所在上下文的主题。系统 WebView（targetSdk ≥ 33）按主题的 android:isLightTheme 设置网页的
+      prefers-color-scheme，不做算法反色。API 29+ 的覆盖见 values-v29/themes_web.xml。
+    -->
+    <style name="Theme.Yiner.Web.Light" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.Yiner.Web.Dark" parent="android:Theme.Material.NoActionBar" />
 </resources>

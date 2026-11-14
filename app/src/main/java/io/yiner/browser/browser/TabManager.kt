@@ -108,7 +108,36 @@ class TabManager(
 
     fun attachActivity(activity: Context?) {
         activityContext = activity
-        contexts.forEach { it.baseContext = activity ?: context }
+        contexts.forEach { it.baseContext = themed(activity ?: context) }
+    }
+
+    /** 当前界面是否为深色（由“设置 → 外观”与系统外观共同决定）。 */
+    var darkTheme: Boolean = false
+        private set
+
+    /**
+     * WebView 的上下文主题：系统 WebView 按主题的 isLightTheme 设置网页 prefers-color-scheme。
+     * 不开启算法暗化（setAlgorithmicDarkeningAllowed 保持默认关闭），不对网页反色。
+     */
+    private fun themed(base: Context): Context =
+        android.view.ContextThemeWrapper(base, if (darkTheme) io.yiner.browser.R.style.Theme_Yiner_Web_Dark else io.yiner.browser.R.style.Theme_Yiner_Web_Light)
+
+    /**
+     * 外观改变时调用。已创建的 WebView 不保证会重新读取主题，因此保存各标签的前进/后退历史后重建 WebView，
+     * 当前标签立即按新外观重新加载，其余标签在切换到时再恢复。[rebuild] 为 false 用于启动时设置初值。
+     */
+    fun setDarkTheme(dark: Boolean, rebuild: Boolean = true) {
+        if (dark == darkTheme) return
+        darkTheme = dark
+        if (!rebuild) return
+        _tabs.value.filter { it.view != null }.forEach { t ->
+            t.view?.let { v -> SessionCodec.save(v)?.let { t.sessionState = it } }
+            destroyView(t)
+        }
+        selectedTab?.let {
+            ensureView(it)
+            _sessionEpoch.value++
+        }
     }
 
     // ------------------------------------------------------------------ 恢复与保存
@@ -364,7 +393,7 @@ class TabManager(
     @SuppressLint("SetJavaScriptEnabled")
     private fun buildView(tab: Tab): WebView {
         hookServiceWorkers()
-        val ctx = MutableContextWrapper(activityContext ?: context).also { contexts.add(it) }
+        val ctx = MutableContextWrapper(themed(activityContext ?: context)).also { contexts.add(it) }
         val view = WebView(ctx)
         // 无痕标签：必须在任何加载之前切换到独立 Profile（其 Service Worker 也单独拦截）
         if (tab.isPrivate) privateProfiles.apply(view) { interceptServiceWorker(it) }
