@@ -43,3 +43,25 @@
 - 打开的标签：GeckoView 的 SessionState 格式不通用，只能按 URL 恢复，前进/后退历史会丢失。
 
 银耳浏览器自己保存的数据，可以写迁移代码保留：历史记录和下载列表（SQLite）、设置（SharedPreferences）、已归档标签的 URL 和标题。
+
+## 5. 2026-11-13 复查：现有 GitHub 资源能否构建 Chromium
+
+| 检查项 | 结果 | 出处 |
+|---|---|---|
+| 仓库自托管 runner | 0 个 | `gh api repos/yinerx/yiner-browser/actions/runners` |
+| 账户类型 | 个人账户（User）。larger runners 只对组织的 GitHub Team / Enterprise Cloud 开放 | `gh api users/yinerx`；https://docs.github.com/en/actions/reference/runners/github-hosted-runners |
+| 公开仓库标准 Linux runner | 4 核、16 GB 内存、**14 GB SSD** | 同上文档；CI 的 “Report runner resources” 步骤会在每次运行时记录实测值 |
+| 单个作业时长上限 | 6 小时 | https://docs.github.com/en/actions/reference/limits |
+
+结论：
+- Chromium Android 构建官方要求至少 100 GB 磁盘。仓库现有的免费托管 runner 只有约 14 GB；在 4 核上做完整构建也很可能超过 6 小时的作业上限。
+- 因此本轮**仍然无法**在现有资源上推进完整 Chromium 内核。按要求，没有购买或开通任何付费资源。
+
+推进所需的额外资源（二选一）：
+- 一台自托管 runner 或构建机：建议 16 核以上、32 GB 以上内存、250 GB 以上 SSD，注册到本仓库；
+- 或者用组织账户开通 larger runners（付费）。
+
+在此之前，界面改造与内核解耦，先在 GeckoView 上交付。新的界面组件不依赖 GeckoView，迁移内核时可以保留：
+- `ui/arc/*`
+- `ui/ScreenContents.kt`
+- `ui/TabSwitcher.kt` 中的 `TabSwitcherContent`

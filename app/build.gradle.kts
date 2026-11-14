@@ -83,6 +83,15 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = true
+        // 界面截图测试（Robolectric 离线渲染）需要合并后的资源
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all {
+            // 只有显式 -Pyiner.screenshots=true 时才渲染界面截图；CI 常规单元测试不运行
+            it.systemProperty("yiner.screenshots", providers.gradleProperty("yiner.screenshots").orNull ?: "false")
+            it.systemProperty("yiner.screenshots.dir", rootProject.layout.buildDirectory.dir("ui-screenshots").get().asFile.absolutePath)
+            it.systemProperty("robolectric.graphicsMode", "NATIVE")
+            it.maxHeapSize = "2g"
+        }
     }
 }
 
@@ -102,4 +111,10 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250517")
+    testImplementation("org.robolectric:robolectric:4.18")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.79.0")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.79.0")
+    testImplementation(platform("androidx.compose:compose-bom:2026.09.00"))
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

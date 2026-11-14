@@ -1,59 +1,169 @@
 package io.yiner.browser.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import io.yiner.browser.MainActivity
 import io.yiner.browser.browser.Tab
 import io.yiner.browser.browser.TabState
+import io.yiner.browser.core.UrlInput
+import io.yiner.browser.ui.arc.ArcIcons
+import io.yiner.browser.ui.arc.ArcSheet
+import io.yiner.browser.ui.arc.ArcSwitch
+import io.yiner.browser.ui.arc.ArcTokens
+import io.yiner.browser.ui.arc.SettingsRow
 import org.mozilla.geckoview.GeckoSession
 
-/** 页内查找栏。 */
+/**
+ * 带遮罩的底部面板容器。点遮罩关闭。
+ * 进出场用上滑/淡入，这是银耳浏览器的选择：参考截图是静态的，不能证明原版的动效与曲线。
+ */
+@Composable
+fun SheetOverlay(scrim: Color, onDismiss: () -> Unit, content: @Composable BoxScope.() -> Unit) {
+    val visible = remember { MutableTransitionState(false).apply { targetState = true } }
+    Box(Modifier.fillMaxSize()) {
+        AnimatedVisibility(visible, enter = fadeIn(), exit = fadeOut()) {
+            Box(
+                Modifier.fillMaxSize().background(scrim)
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
+            )
+        }
+        AnimatedVisibility(
+            visible, Modifier.align(Alignment.BottomCenter),
+            enter = slideInVertically { it / 2 } + fadeIn(), exit = slideOutVertically { it } + fadeOut(),
+        ) {
+            Box(Modifier.fillMaxWidth(), content = content)
+        }
+    }
+}
+
+/** 页面菜单（参考图 02）。 */
+@Composable
+fun PageMenu(activity: MainActivity, tab: Tab, state: TabState, onDismiss: () -> Unit) {
+    val ui = activity.ui
+    val tm = activity.app.tabManager
+    val prefs = activity.app.prefs
+    val settings by prefs.settings.collectAsState()
+    val pinned by prefs.pinned.collectAsState()
+
+    fun act(block: () -> Unit): () -> Unit = {
+        onDismiss()
+        block()
+    }
+
+    SheetOverlay(ArcTokens.MenuScrim, onDismiss) {
+        PageMenuContent(
+            PageMenuModel(
+                url = state.url,
+                canGoBack = state.canGoBack,
+                canGoForward = state.canGoForward,
+                loading = state.loading,
+                pinned = pinned.any { it.url == state.url },
+                textZoomPercent = settings.textZoomPercent,
+                desktopMode = state.desktopMode,
+                blockedCount = state.blockedCount,
+            ),
+            PageMenuActions(
+                onBack = act { tab.session?.goBack() },
+                onForward = act { tab.session?.goForward() },
+                onEditAddress = act { ui.search = SearchRequest(state.url, inCurrentTab = true, isPrivate = tab.isPrivate) },
+                onCopyLink = act { activity.copyUrl(tab) },
+                onRefreshOrStop = act { if (state.loading) tab.session?.stop() else tab.session?.reload() },
+                onTogglePin = act {
+                    val now = prefs.togglePin(state.url, tab.displayTitle)
+                    activity.toast(if (now) "已固定，会显示在搜索面板中" else "已取消固定")
+                },
+                onFind = act { ui.findOpen = true },
+                onShare = act { activity.shareUrl(tab) },
+                onZoom = { activity.setTextZoom(it) },
+                onDesktop = { v -> onDismiss(); tm.setDesktopMode(tab, v) },
+                onSiteSettings = { ui.menuOpen = false; ui.siteSettingsOpen = true },
+                onNewPrivateTab = act { ui.search = SearchRequest("", inCurrentTab = false, isPrivate = true) },
+            ),
+        )
+    }
+}
+
+/**
+ * 单个网站的设置面板（参考 Google Play 宣传图中的 “Site Settings” 面板）。
+ * “拦截 Cookie 横幅”没有做：GeckoView 160 未提供对应接口。
+ */
+@Composable
+fun SiteSettingsSheet(activity: MainActivity, tab: Tab, state: TabState, onDismiss: () -> Unit) {
+    val app = activity.app
+    val settings by app.prefs.settings.collectAsState()
+    SheetOverlay(ArcTokens.MenuScrim, onDismiss) {
+        ArcSheet {
+            Text("网站设置", Modifier.padding(start = 24.dp, top = 28.dp), fontSize = 28.sp, color = ArcTokens.TextPrimary)
+            Text(
+                "${UrlInput.displayHost(state.url).ifBlank { "此网站" }} 设置",
+                Modifier.padding(start = 24.dp, top = 12.dp, bottom = 8.dp), fontSize = 16.sp, color = ArcTokens.TextSecondary,
+            )
+            if (state.trackingToggleAvailable) {
+                SettingsRow(ArcIcons.Shield, "拦截跟踪器", subtitle = "仅对此网站生效", trailing = {
+                    ArcSwitch(!state.trackingExempt) { enabled -> app.tabManager.setTrackingExempt(tab, exempt = !enabled) }
+                })
+            } else {
+                SettingsRow(ArcIcons.Shield, "拦截跟踪器", subtitle = "此页面不支持单独设置")
+            }
+            SettingsRow(ArcIcons.Shield, "拦截广告（全局）", subtitle = "要放行单个网站，请在 uBlock Origin 的信任站点中添加", trailing = {
+                ArcSwitch(settings.adBlockEnabled) { v -> app.adBlocker.setEnabled(app.runtime, v) }
+            })
+            SettingsRow(null, "打开 uBlock Origin 信任站点", onClick = {
+                val url = app.adBlocker.optionsPageUrl
+                onDismiss()
+                if (url != null) activity.openInNewTab(url) else activity.toast("uBlock Origin 尚未就绪")
+            })
+            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.navigationBarsPadding())
+        }
+    }
+}
+
+/** 页内查找栏（截图中没有出现查找界面，这里沿用银耳浏览器自己的样式，配色与底栏一致）。 */
 @Composable
 fun FindBar(tab: Tab, onClose: () -> Unit) {
     var query by remember { mutableStateOf("") }
@@ -81,112 +191,38 @@ fun FindBar(tab: Tab, onClose: () -> Unit) {
         onClose()
     }
 
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
-        Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextField(
-                value = query,
-                onValueChange = { query = it; find(backwards = false, again = false) },
-                modifier = Modifier.weight(1f).focusRequester(focus),
-                singleLine = true,
-                placeholder = { Text("在页面中查找") },
-                suffix = { Text(status, style = MaterialTheme.typography.labelMedium) },
-                shape = RoundedCornerShape(22.dp),
-                colors = TextFieldDefaults.colors(
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                ),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { find(backwards = false, again = true) }),
-            )
-            IconButton(onClick = { find(backwards = true, again = true) }) { Icon(Icons.Filled.KeyboardArrowUp, "上一个") }
-            IconButton(onClick = { find(backwards = false, again = true) }) { Icon(Icons.Filled.KeyboardArrowDown, "下一个") }
-            IconButton(onClick = ::close) { Icon(Icons.Filled.Close, "关闭查找") }
-        }
-    }
-}
-
-/** 页面菜单（底部弹出）。 */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun PageMenu(activity: MainActivity, tab: Tab, state: TabState, onDismiss: () -> Unit) {
-    val ui = activity.ui
-    val tm = activity.app.tabManager
-    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
-    fun act(block: () -> Unit) {
-        onDismiss()
-        block()
-    }
-
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet) {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding()) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-                QuickAction(Icons.AutoMirrored.Filled.ArrowForward, "前进", enabled = state.canGoForward) {
-                    act { tab.session?.goForward() }
+    Column(Modifier.fillMaxWidth().background(ArcTokens.PanelGray)) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(ArcTokens.BarDivider))
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.weight(1f).height(48.dp).clip(CircleShape).background(Color.White).padding(horizontal = 18.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.weight(1f)) {
+                    if (query.isEmpty()) Text("在页面中查找", fontSize = 17.sp, color = ArcTokens.Placeholder)
+                    BasicTextField(
+                        value = query, onValueChange = { query = it; find(backwards = false, again = false) },
+                        modifier = Modifier.fillMaxWidth().focusRequester(focus), singleLine = true,
+                        textStyle = TextStyle(fontSize = 17.sp, color = ArcTokens.TextPrimary),
+                        cursorBrush = SolidColor(ArcTokens.SwitchOn),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { find(backwards = false, again = true) }),
+                    )
                 }
-                QuickAction(if (state.loading) Icons.Filled.Close else Icons.Filled.Refresh, if (state.loading) "停止" else "刷新") {
-                    act { if (state.loading) tab.session?.stop() else tab.session?.reload() }
-                }
-                QuickAction(Icons.Filled.Share, "分享") { act { activity.shareUrl(tab) } }
+                Text(status, fontSize = 14.sp, color = ArcTokens.TextSecondary)
             }
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
-
-            MenuItem("新建标签页") { act { ui.search = SearchRequest("", inCurrentTab = false, isPrivate = false) } }
-            MenuItem("新建无痕标签页") { act { ui.search = SearchRequest("", inCurrentTab = false, isPrivate = true) } }
-            MenuItem("在页面中查找") { act { ui.findOpen = true } }
-            MenuItem("复制链接") { act { activity.copyUrl(tab) } }
-            SwitchItem("桌面版网站", state.desktopMode) { tm.setDesktopMode(tab, it); onDismiss() }
-            if (state.trackingToggleAvailable) {
-                SwitchItem(
-                    "此网站启用跟踪保护",
-                    !state.trackingExempt,
-                    subtitle = "关闭后此网站不再拦截跟踪器（不影响 uBlock Origin）",
-                ) { enabled -> tm.setTrackingExempt(tab, exempt = !enabled); onDismiss() }
+            IconButton(onClick = { find(backwards = true, again = true) }) { Icon(ArcIcons.ChevronUp, "上一个", tint = ArcTokens.TextPrimary) }
+            IconButton(onClick = { find(backwards = false, again = true) }) {
+                Icon(ArcIcons.ChevronUp, "下一个", Modifier.size(24.dp).rotate(180f), tint = ArcTokens.TextPrimary)
             }
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
-            MenuItem("历史记录") { ui.openPage(Screen.HISTORY) }
-            MenuItem("下载") { ui.openPage(Screen.DOWNLOADS) }
-            MenuItem("设置") { ui.openPage(Screen.SETTINGS) }
-            MenuItem("关闭此标签页") { act { tm.close(tab.id) } }
-            Spacer(Modifier.height(12.dp))
+            IconButton(onClick = ::close) { Icon(ArcIcons.Close, "关闭查找", tint = ArcTokens.TextPrimary) }
         }
+        Spacer(Modifier.navigationBarsPadding())
     }
 }
 
-@Composable
-private fun QuickAction(icon: ImageVector, label: String, enabled: Boolean = true, onClick: () -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(4.dp)) {
-        IconButton(onClick = onClick, enabled = enabled) { Icon(icon, label) }
-        Text(
-            label, style = MaterialTheme.typography.labelSmall,
-            color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
-        )
-    }
-}
-
-@Composable
-fun MenuItem(label: String, subtitle: String? = null, onClick: () -> Unit) {
-    Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 24.dp, vertical = 14.dp)) {
-        Text(label, style = MaterialTheme.typography.bodyLarge)
-        if (subtitle != null) {
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
+/** 设置页中的开关行（供“更新”分区使用）。 */
 @Composable
 fun SwitchItem(label: String, checked: Boolean, subtitle: String? = null, onChange: (Boolean) -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clickable { onChange(!checked) }.padding(horizontal = 24.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.bodyLarge)
-            if (subtitle != null) {
-                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-        Spacer(Modifier.width(12.dp))
-        Switch(checked = checked, onCheckedChange = onChange)
-    }
+    SettingsRow(null, label, subtitle = subtitle, onClick = { onChange(!checked) }, trailing = { ArcSwitch(checked, onChange) })
 }

@@ -2,52 +2,26 @@ package io.yiner.browser.ui
 
 import android.view.View
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.viewinterop.AndroidView
 import io.yiner.browser.MainActivity
-import io.yiner.browser.browser.Tab
-import io.yiner.browser.browser.TabState
 import io.yiner.browser.core.BackAction
 import io.yiner.browser.core.BackContext
 import io.yiner.browser.core.BackPolicy
-import io.yiner.browser.core.UrlInput
+import io.yiner.browser.ui.arc.ArcBottomBar
+import kotlinx.coroutines.delay
 
 @Composable
 fun BrowserApp(activity: MainActivity) {
@@ -63,7 +37,7 @@ fun BrowserApp(activity: MainActivity) {
         val gv = activity.geckoView
         if (selected == null) {
             if (gv.session != null) gv.releaseSession()
-            if (ui.screen == Screen.BROWSER) ui.screen = Screen.HOME
+            if (ui.screen == Screen.BROWSER) ui.screen = Screen.TABS
             if (ui.fullscreen) activity.setFullscreen(false)
         } else {
             val session = tm.ensureSession(selected)
@@ -76,12 +50,21 @@ fun BrowserApp(activity: MainActivity) {
     }
 
     val selectedState = selected?.state?.collectAsState()?.value
+    val currentThumb = selected?.thumbnail?.collectAsState()?.value
+
+    // 页面加载完成后截一张缩略图，用于底栏和标签卡片
+    LaunchedEffect(selectedId, selectedState?.loading, ui.screen) {
+        if (ui.screen == Screen.BROWSER && selectedState?.loading == false) {
+            delay(900)
+            activity.captureThumbnail()
+        }
+    }
 
     val backAction = BackPolicy.decide(
         BackContext(
             inFullscreen = ui.fullscreen,
             overlayOpen = ui.overlayOpen,
-            showingHome = ui.screen == Screen.HOME,
+            showingHome = ui.screen == Screen.TABS,
             hasTab = selected != null,
             canGoBack = selectedState?.canGoBack == true,
             tabOpenedByOtherApp = selected?.openedByOtherApp == true,
@@ -98,23 +81,20 @@ fun BrowserApp(activity: MainActivity) {
             BackAction.GO_BACK_IN_PAGE -> selected?.session?.goBack()
             BackAction.CLOSE_TAB_AND_RETURN_TO_APP -> {
                 selected?.let { tm.close(it.id) }
-                ui.screen = Screen.HOME
+                ui.screen = Screen.TABS
                 activity.returnToCallingApp()
             }
             BackAction.CLOSE_TAB_AND_SHOW_PARENT -> selected?.let { tm.close(it.id) }
-            BackAction.SHOW_HOME -> {
-                ui.homePrivate = selected?.isPrivate == true
-                ui.screen = Screen.HOME
-            }
+            BackAction.SHOW_HOME -> activity.showTabs()
             BackAction.SYSTEM -> Unit
         }
     }
 
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        // 浏览界面：GeckoView 始终保留在界面树里，避免反复重建 Surface
+    Box(Modifier.fillMaxSize().background(Color.White)) {
+        // 浏览界面（01）：网页占满主体，底部是轻薄工具栏；GeckoView 始终保留在界面树里，避免反复重建 Surface
         Column(
             Modifier.fillMaxSize()
-                .then(if (ui.fullscreen) Modifier else Modifier.statusBarsPadding().navigationBarsPadding().imePadding()),
+                .then(if (ui.fullscreen) Modifier else Modifier.statusBarsPadding().imePadding()),
         ) {
             AndroidView(
                 factory = { activity.geckoView },
@@ -125,101 +105,41 @@ fun BrowserApp(activity: MainActivity) {
                 if (ui.findOpen) {
                     FindBar(selected, onClose = { ui.findOpen = false })
                 } else {
-                    BrowserBar(activity, selected, selectedState, tabCount = tabs.count { it.isPrivate == selected.isPrivate })
+                    val behind = tabs.filter { it.id != selected.id }.maxByOrNull { it.lastActiveAt }
+                    ArcBottomBar(
+                        current = currentThumb,
+                        behind = behind?.thumbnail?.collectAsState()?.value,
+                        tabCount = tabs.size,
+                        isPrivate = selected.isPrivate,
+                        progress = if (selectedState.loading) selectedState.progress / 100f else null,
+                        onTabs = { activity.showTabs() },
+                        onPlus = { ui.search = SearchRequest("", inCurrentTab = false, isPrivate = selected.isPrivate) },
+                        onExpand = { activity.captureThumbnail(); ui.menuOpen = true },
+                    )
                 }
             }
         }
 
-        if (ui.screen == Screen.HOME) HomeScreen(activity)
+        if (ui.screen == Screen.TABS) TabSwitcherScreen(activity)
 
         when (ui.screen) {
+            Screen.SETTINGS -> SettingsPage(activity)
+            Screen.SEARCH_ENGINES -> SearchEnginesPage(activity)
+            Screen.SITE_SETTINGS_GLOBAL -> GlobalSiteSettingsPage(activity)
+            Screen.ARCHIVE_AFTER -> ArchiveAfterPage(activity)
             Screen.HISTORY -> HistoryPage(activity)
             Screen.DOWNLOADS -> DownloadsPage(activity)
             Screen.ARCHIVED -> ArchivedPage(activity)
-            Screen.SETTINGS -> SettingsPage(activity)
             else -> Unit
         }
-
-        ui.search?.let { SearchLayer(activity, it) }
 
         if (ui.menuOpen && selected != null && selectedState != null) {
             PageMenu(activity, selected, selectedState, onDismiss = { ui.menuOpen = false })
         }
-    }
-}
-
-@Composable
-private fun BrowserBar(activity: MainActivity, tab: Tab, state: TabState, tabCount: Int) {
-    val ui = activity.ui
-    val private = tab.isPrivate
-    Surface(color = if (private) PrivateAccent.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surfaceContainer) {
-        Column {
-            AnimatedVisibility(visible = state.loading) {
-                LinearProgressIndicator(
-                    progress = { state.progress.coerceIn(0, 100) / 100f },
-                    modifier = Modifier.fillMaxWidth().height(2.dp),
-                )
-            }
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(
-                    onClick = { if (state.canGoBack) tab.session?.goBack() else ui.screen = Screen.HOME },
-                ) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "后退") }
-
-                Row(
-                    Modifier.weight(1f).height(42.dp).clip(RoundedCornerShape(21.dp))
-                        .background(MaterialTheme.colorScheme.surface)
-                        .clickable {
-                            ui.search = SearchRequest(state.url, inCurrentTab = true, isPrivate = private)
-                        }
-                        .padding(horizontal = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (state.secure) {
-                        Icon(
-                            Icons.Filled.Lock, contentDescription = "安全连接",
-                            modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(Modifier.width(6.dp))
-                    }
-                    if (private) {
-                        Text("无痕", color = PrivateAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.width(6.dp))
-                    }
-                    Text(
-                        UrlInput.displayHost(state.url).ifBlank { state.title.ifBlank { "搜索或输入网址" } },
-                        maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-
-                TabCountButton(tabCount, private) {
-                    ui.homePrivate = private
-                    ui.screen = Screen.HOME
-                }
-                IconButton(onClick = { ui.menuOpen = true }) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = "菜单")
-                }
-            }
+        if (ui.siteSettingsOpen && selected != null && selectedState != null) {
+            SiteSettingsSheet(activity, selected, selectedState, onDismiss = { ui.siteSettingsOpen = false })
         }
-    }
-}
 
-@Composable
-fun TabCountButton(count: Int, private: Boolean, onClick: () -> Unit) {
-    val color = if (private) PrivateAccent else MaterialTheme.colorScheme.onSurface
-    Box(
-        Modifier.padding(start = 6.dp).size(40.dp).clip(RoundedCornerShape(10.dp)).clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(
-            Modifier.size(24.dp).clip(RoundedCornerShape(6.dp))
-                .background(color.copy(alpha = 0.12f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(if (count > 99) "∞" else count.toString(), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = color)
-        }
+        ui.search?.let { SearchLayer(activity, it) }
     }
 }

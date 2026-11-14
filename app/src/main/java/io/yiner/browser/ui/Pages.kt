@@ -9,29 +9,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -43,11 +32,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import io.yiner.browser.BuildConfig
 import io.yiner.browser.MainActivity
 import io.yiner.browser.browser.AdBlocker
@@ -59,6 +46,16 @@ import io.yiner.browser.data.ArchivedTab
 import io.yiner.browser.data.DownloadRecord
 import io.yiner.browser.data.DownloadStatus
 import io.yiner.browser.data.HistoryEntry
+import io.yiner.browser.data.Settings
+import io.yiner.browser.ui.arc.ArcIcons
+import io.yiner.browser.ui.arc.ArcSwitch
+import io.yiner.browser.ui.arc.ArcTokens
+import io.yiner.browser.ui.arc.ChoiceRow
+import io.yiner.browser.ui.arc.SectionHeader
+import io.yiner.browser.ui.arc.SettingsNote
+import io.yiner.browser.ui.arc.SettingsRow
+import io.yiner.browser.ui.arc.SettingsScaffold
+import io.yiner.browser.ui.arc.SiteBadge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -67,39 +64,149 @@ import org.mozilla.geckoview.StorageController
 import java.text.DateFormat
 import java.util.Date
 
-@OptIn(ExperimentalMaterial3Api::class)
+private fun formatTime(t: Long): String =
+    DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(t))
+
+private fun MainActivity.updateSettings(transform: (Settings) -> Settings) {
+    app.prefs.update(transform)
+    AdBlocker.applyRuntimeSettings(app.runtime, app.prefs.settings.value)
+}
+
 @Composable
-private fun PageScaffold(
-    title: String,
-    onBack: () -> Unit,
-    actions: @Composable () -> Unit = {},
-    content: @Composable () -> Unit,
-) {
-    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-            TopAppBar(
-                title = { Text(title) },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
-                actions = { actions() },
-            )
-            content()
+private fun Empty(text: String) = SettingsNote(text)
+
+// ---------------------------------------------------------------------------- 应用设置（05）
+
+@Composable
+fun SettingsPage(activity: MainActivity) {
+    val ui = activity.ui
+    val app = activity.app
+    val settings by app.prefs.settings.collectAsState()
+    val isDefault by activity.isDefaultBrowser
+    var showClear by remember { mutableStateOf(false) }
+    var showLicenses by remember { mutableStateOf(false) }
+
+    AppSettingsContent(
+        AppSettingsModel(
+            isDefaultBrowser = isDefault,
+            searchEngineLabel = settings.searchEngine.label,
+            archiveLabel = if (settings.archiveAfter == ArchiveAfter.OFF) "从不" else "${settings.archiveAfter.label}后",
+            autoOpenKeyboard = settings.autoOpenKeyboard,
+            searchSuggestions = settings.searchSuggestions,
+            versionName = BuildConfig.VERSION_NAME,
+            engineDescription = "内核 GeckoView ${GeckoBuildConfig.MOZ_APP_VERSION}（Mozilla）· 个人自用的独立项目",
+        ),
+        onBack = { ui.closeTopOverlay() },
+        onOpen = { t ->
+            when (t) {
+                SettingsTarget.GLOBAL_SITE -> ui.openPage(Screen.SITE_SETTINGS_GLOBAL)
+                SettingsTarget.DEFAULT_BROWSER -> if (isDefault) activity.openDefaultAppsSettings() else activity.requestDefaultBrowser()
+                SettingsTarget.SEARCH_ENGINES -> ui.openPage(Screen.SEARCH_ENGINES)
+                SettingsTarget.ARCHIVED -> ui.openPage(Screen.ARCHIVED)
+                SettingsTarget.ARCHIVE_AFTER -> ui.openPage(Screen.ARCHIVE_AFTER)
+                SettingsTarget.CLEAR_DATA -> showClear = true
+                SettingsTarget.DOWNLOADS -> ui.openPage(Screen.DOWNLOADS)
+                SettingsTarget.HISTORY -> ui.openPage(Screen.HISTORY)
+                SettingsTarget.LICENSES -> showLicenses = true
+            }
+        },
+        onAutoOpenKeyboard = { v -> activity.updateSettings { it.copy(autoOpenKeyboard = v) } },
+        onSearchSuggestions = { v -> activity.updateSettings { it.copy(searchSuggestions = v) } },
+        updateSection = { UpdateSection(activity) },
+    )
+
+    if (showClear) ClearDataDialog(activity) { showClear = false }
+    if (showLicenses) {
+        AlertDialog(
+            onDismissRequest = { showLicenses = false },
+            title = { Text("开源许可") },
+            text = {
+                Text(
+                    "GeckoView — Mozilla Public License 2.0\nhttps://www.mozilla.org/MPL/2.0/\n\n" +
+                        "uBlock Origin ${AdBlocker.BUNDLED_VERSION}（Raymond Hill 等）— GPL-3.0\n" +
+                        "源代码：https://github.com/gorhill/uBlock\n本应用内置的是 addons.mozilla.org 发布的官方签名版本，未做任何修改。\n\n" +
+                        "AndroidX / Jetpack Compose / Kotlin — Apache License 2.0",
+                )
+            },
+            confirmButton = { TextButton(onClick = { showLicenses = false }) { Text("好") } },
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------- 搜索引擎（06）
+
+@Composable
+fun SearchEnginesPage(activity: MainActivity) {
+    val settings by activity.app.prefs.settings.collectAsState()
+    val engines = SearchEngine.entries
+    SearchEnginesContent(
+        labels = engines.map { it.label },
+        selected = engines.indexOf(settings.searchEngine),
+        onSelect = { i -> activity.updateSettings { it.copy(searchEngine = engines[i]) } },
+        onBack = { activity.ui.closeTopOverlay() },
+    )
+}
+
+// ---------------------------------------------------------------------------- 全局网站设置
+
+@Composable
+fun GlobalSiteSettingsPage(activity: MainActivity) {
+    val app = activity.app
+    val settings by app.prefs.settings.collectAsState()
+    val adStatus by app.adBlocker.status.collectAsState()
+    SettingsScaffold("全局网站设置", onBack = { activity.ui.closeTopOverlay() }) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding()) {
+            val adSubtitle = when (val s = adStatus) {
+                AdBlocker.Status.Installing -> "正在安装 uBlock Origin…"
+                is AdBlocker.Status.Ready -> "uBlock Origin ${s.version}"
+                is AdBlocker.Status.Failed -> "不可用：${s.message}"
+            }
+            SectionHeader("拦截")
+            SettingsRow(ArcIcons.Shield, "拦截广告", subtitle = adSubtitle, trailing = {
+                ArcSwitch(settings.adBlockEnabled) { v -> app.adBlocker.setEnabled(app.runtime, v) }
+            })
+            SettingsRow(ArcIcons.Shield, "严格跟踪保护", subtitle = "额外拦截社交跟踪与指纹识别；个别网站或登录流程可能异常", trailing = {
+                ArcSwitch(settings.strictTrackingProtection) { v -> activity.updateSettings { it.copy(strictTrackingProtection = v) } }
+            })
+            SettingsRow(ArcIcons.Lock, "仅 HTTPS 模式", subtitle = "不支持 HTTPS 的网站将无法打开", trailing = {
+                ArcSwitch(settings.httpsOnly) { v -> activity.updateSettings { it.copy(httpsOnly = v) } }
+            })
+            if (adStatus is AdBlocker.Status.Ready) {
+                SectionHeader("uBlock Origin")
+                SettingsRow(null, "过滤规则与信任站点", subtitle = "打开 uBlock Origin 控制面板") {
+                    val url = app.adBlocker.optionsPageUrl
+                    if (url != null) activity.openInNewTab(url) else activity.toast("uBlock Origin 未提供设置页")
+                }
+                SettingsRow(null, "检查 uBlock Origin 更新", subtitle = "通过 addons.mozilla.org") {
+                    activity.toast("正在检查…")
+                    app.adBlocker.checkForUpdate(app.runtime) { activity.toast(it) }
+                }
+            }
         }
     }
 }
 
-@Composable
-private fun EmptyHint(text: String) {
-    Text(text, Modifier.fillMaxWidth().padding(32.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-}
+// ---------------------------------------------------------------------------- 归档时长
 
-private fun formatTime(t: Long): String =
-    DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(t))
+@Composable
+fun ArchiveAfterPage(activity: MainActivity) {
+    val settings by activity.app.prefs.settings.collectAsState()
+    SettingsScaffold("归档不活跃的标签", onBack = { activity.ui.closeTopOverlay() }) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            SectionHeader("多久未使用后归档")
+            ArchiveAfter.entries.forEach { a ->
+                ChoiceRow(if (a == ArchiveAfter.OFF) "从不" else "${a.label}后", settings.archiveAfter == a, onClick = {
+                    activity.updateSettings { it.copy(archiveAfter = a) }
+                }) { Icon(ArcIcons.ArchiveTimer, null, Modifier.padding(start = 0.dp), tint = ArcTokens.TextPrimary) }
+            }
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------- 历史
 
 @Composable
 fun HistoryPage(activity: MainActivity) {
-    val ui = activity.ui
     val db = activity.app.db
     var query by remember { mutableStateOf("") }
     var version by remember { mutableIntStateOf(0) }
@@ -109,33 +216,30 @@ fun HistoryPage(activity: MainActivity) {
 
     LaunchedEffect(query, version) { items = withContext(Dispatchers.IO) { db.history(query) } }
 
-    PageScaffold("历史记录", onBack = { ui.closeTopOverlay() }, actions = {
-        TextButton(onClick = { confirmClear = true }) { Text("清空") }
-    }) {
-        OutlinedTextField(
-            value = query, onValueChange = { query = it }, singleLine = true,
-            placeholder = { Text("搜索历史记录") },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-        )
-        if (items.isEmpty()) EmptyHint(if (query.isBlank()) "暂无历史记录" else "没有匹配的记录")
+    SettingsScaffold("历史记录", onBack = { activity.ui.closeTopOverlay() }) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = query, onValueChange = { query = it }, singleLine = true,
+                placeholder = { Text("搜索历史记录") }, shape = CircleShape,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = { confirmClear = true }) { Text("清空") }
+        }
+        if (items.isEmpty()) Empty(if (query.isBlank()) "暂无历史记录" else "没有匹配的记录")
         LazyColumn(Modifier.fillMaxSize()) {
             items(items, key = { it.url }) { h ->
                 Row(
-                    Modifier.fillMaxWidth().clickable { activity.openInNewTab(h.url) }
-                        .padding(start = 20.dp, top = 10.dp, bottom = 10.dp),
+                    Modifier.fillMaxWidth().clickable { activity.openInNewTab(h.url) }.padding(start = 20.dp, top = 8.dp, bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(h.title.ifBlank { h.url }, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(
-                            "${UrlInput.displayHost(h.url)} · ${formatTime(h.visitedAt)}", maxLines = 1,
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    SiteBadge(UrlInput.displayHost(h.url), ArcTokens.SuggestionIcon)
+                    Column(Modifier.weight(1f).padding(start = 14.dp)) {
+                        Text(h.title.ifBlank { h.url }, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = ArcTokens.TextPrimary)
+                        Text("${UrlInput.displayHost(h.url)} · ${formatTime(h.visitedAt)}", fontSize = 13.sp, maxLines = 1, color = ArcTokens.TextSecondary)
                     }
-                    IconButton(onClick = {
-                        scope.launch { withContext(Dispatchers.IO) { db.deleteHistory(h.url) }; version++ }
-                    }) { Icon(Icons.Filled.Close, "删除") }
+                    IconButton(onClick = { scope.launch { withContext(Dispatchers.IO) { db.deleteHistory(h.url) }; version++ } }) {
+                        Icon(ArcIcons.Close, "删除", tint = ArcTokens.TextSecondary)
+                    }
                 }
             }
         }
@@ -160,7 +264,6 @@ fun HistoryPage(activity: MainActivity) {
 
 @Composable
 fun DownloadsPage(activity: MainActivity) {
-    val ui = activity.ui
     val db = activity.app.db
     val changes by activity.app.downloads.version.collectAsState()
     var local by remember { mutableIntStateOf(0) }
@@ -168,24 +271,21 @@ fun DownloadsPage(activity: MainActivity) {
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(changes, local) { items = withContext(Dispatchers.IO) { db.downloads() } }
-    // 下载进行中时定期刷新进度
     LaunchedEffect(items) {
         if (items.any { it.status == DownloadStatus.RUNNING }) {
             kotlinx.coroutines.delay(1000); local++
         }
     }
 
-    PageScaffold("下载", onBack = { ui.closeTopOverlay() }, actions = {
-        TextButton(onClick = { scope.launch { withContext(Dispatchers.IO) { db.clearDownloads() }; local++ } }) {
-            Text("清空列表")
+    SettingsScaffold("下载", onBack = { activity.ui.closeTopOverlay() }) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "文件保存在系统“下载”目录。从列表移除不会删除文件。",
+                Modifier.weight(1f).padding(start = 20.dp), fontSize = 14.sp, color = ArcTokens.TextSecondary,
+            )
+            TextButton(onClick = { scope.launch { withContext(Dispatchers.IO) { db.clearDownloads() }; local++ } }) { Text("清空列表") }
         }
-    }) {
-        Text(
-            "文件保存在系统“下载”目录。从列表移除不会删除文件。",
-            Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        if (items.isEmpty()) EmptyHint("暂无下载")
+        if (items.isEmpty()) Empty("暂无下载")
         LazyColumn(Modifier.fillMaxSize()) {
             items(items, key = { it.id }) { d ->
                 Row(
@@ -193,11 +293,12 @@ fun DownloadsPage(activity: MainActivity) {
                         .clickable(enabled = d.status == DownloadStatus.DONE && d.contentUri != null) {
                             activity.openDownload(d.contentUri!!, d.mimeType)
                         }
-                        .padding(start = 20.dp, top = 10.dp, bottom = 10.dp),
+                        .padding(start = 20.dp, top = 8.dp, bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(d.fileName, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Icon(ArcIcons.Download, null, tint = ArcTokens.TextPrimary)
+                    Column(Modifier.weight(1f).padding(start = 14.dp)) {
+                        Text(d.fileName, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = ArcTokens.TextPrimary)
                         val status = when (d.status) {
                             DownloadStatus.RUNNING -> "下载中 ${DownloadNaming.formatSize(d.downloadedBytes)}" +
                                 if (d.totalBytes > 0) " / ${DownloadNaming.formatSize(d.totalBytes)}" else ""
@@ -205,15 +306,12 @@ fun DownloadsPage(activity: MainActivity) {
                             DownloadStatus.FAILED -> "失败"
                             DownloadStatus.CANCELLED -> "已取消"
                         }
-                        Text(
-                            "$status · ${formatTime(d.createdAt)}",
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        Text("$status · ${formatTime(d.createdAt)}", fontSize = 13.sp, color = ArcTokens.TextSecondary)
                     }
                     if (d.status != DownloadStatus.RUNNING) {
-                        IconButton(onClick = {
-                            scope.launch { withContext(Dispatchers.IO) { db.deleteDownload(d.id) }; local++ }
-                        }) { Icon(Icons.Filled.Close, "从列表移除") }
+                        IconButton(onClick = { scope.launch { withContext(Dispatchers.IO) { db.deleteDownload(d.id) }; local++ } }) {
+                            Icon(ArcIcons.Close, "从列表移除", tint = ArcTokens.TextSecondary)
+                        }
                     }
                 }
             }
@@ -221,190 +319,49 @@ fun DownloadsPage(activity: MainActivity) {
     }
 }
 
-// ---------------------------------------------------------------------------- 已归档标签
+// ---------------------------------------------------------------------------- 已归档
 
 @Composable
 fun ArchivedPage(activity: MainActivity) {
-    val ui = activity.ui
     val db = activity.app.db
     val tm = activity.app.tabManager
     val archiveVersion by tm.archiveVersion.collectAsState()
-    val settings by activity.app.prefs.settings.collectAsState()
     var local by remember { mutableIntStateOf(0) }
     var items by remember { mutableStateOf<List<ArchivedTab>>(emptyList()) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(archiveVersion, local) { items = withContext(Dispatchers.IO) { db.archivedTabs() } }
 
-    PageScaffold("已归档的标签", onBack = { ui.closeTopOverlay() }, actions = {
-        TextButton(onClick = { scope.launch { withContext(Dispatchers.IO) { db.clearArchived() }; local++ } }) {
-            Text("清空")
+    SettingsScaffold("已归档", onBack = { activity.ui.closeTopOverlay() }) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("点按即可恢复标签。", Modifier.weight(1f).padding(start = 20.dp), fontSize = 14.sp, color = ArcTokens.TextSecondary)
+            TextButton(onClick = { scope.launch { withContext(Dispatchers.IO) { db.clearArchived() }; local++ } }) { Text("清空") }
         }
-    }) {
-        Text(
-            if (settings.archiveAfter == ArchiveAfter.OFF) "自动归档已关闭。"
-            else "超过 ${settings.archiveAfter.label} 未使用的标签会自动移到这里。点按即可恢复。",
-            Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        if (items.isEmpty()) EmptyHint("没有已归档的标签")
+        if (items.isEmpty()) Empty("没有已归档的标签")
         LazyColumn(Modifier.fillMaxSize()) {
             items(items, key = { it.id }) { a ->
                 Row(
                     Modifier.fillMaxWidth().clickable {
                         tm.restoreArchived(a)
                         activity.showBrowser()
-                    }.padding(start = 20.dp, top = 10.dp, bottom = 10.dp),
+                    }.padding(start = 20.dp, top = 8.dp, bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(a.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(
-                            "${UrlInput.displayHost(a.url)} · 归档于 ${formatTime(a.archivedAt)}", maxLines = 1,
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    SiteBadge(UrlInput.displayHost(a.url), ArcTokens.SuggestionIcon)
+                    Column(Modifier.weight(1f).padding(start = 14.dp)) {
+                        Text(a.title, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = ArcTokens.TextPrimary)
+                        Text("${UrlInput.displayHost(a.url)} · 归档于 ${formatTime(a.archivedAt)}", fontSize = 13.sp, maxLines = 1, color = ArcTokens.TextSecondary)
                     }
-                    IconButton(onClick = {
-                        scope.launch { withContext(Dispatchers.IO) { db.removeArchived(a.id) }; local++ }
-                    }) { Icon(Icons.Filled.Close, "删除") }
+                    IconButton(onClick = { scope.launch { withContext(Dispatchers.IO) { db.removeArchived(a.id) }; local++ } }) {
+                        Icon(ArcIcons.Close, "删除", tint = ArcTokens.TextSecondary)
+                    }
                 }
             }
         }
     }
 }
 
-// ---------------------------------------------------------------------------- 设置
-
-@Composable
-fun SettingsPage(activity: MainActivity) {
-    val ui = activity.ui
-    val app = activity.app
-    val settings by app.prefs.settings.collectAsState()
-    val adStatus by app.adBlocker.status.collectAsState()
-    val isDefault by activity.isDefaultBrowser
-    var showClear by remember { mutableStateOf(false) }
-    var showLicenses by remember { mutableStateOf(false) }
-
-    fun update(transform: (io.yiner.browser.data.Settings) -> io.yiner.browser.data.Settings) {
-        app.prefs.update(transform)
-        AdBlocker.applyRuntimeSettings(app.runtime, app.prefs.settings.value)
-    }
-
-    PageScaffold("设置", onBack = { ui.closeTopOverlay() }) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-            Section("默认浏览器")
-            MenuItem(
-                if (isDefault) "银耳浏览器已是默认浏览器" else "设为默认浏览器",
-                subtitle = if (isDefault) "其它应用中的链接会用银耳浏览器打开" else "需要在系统对话框或系统设置中确认",
-            ) { if (isDefault) activity.openDefaultAppsSettings() else activity.requestDefaultBrowser() }
-
-            Section("搜索")
-            SearchEngine.entries.forEach { e ->
-                Row(
-                    Modifier.fillMaxWidth()
-                        .selectable(selected = settings.searchEngine == e, role = Role.RadioButton) {
-                            update { it.copy(searchEngine = e) }
-                        }
-                        .padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    RadioButton(selected = settings.searchEngine == e, onClick = null, modifier = Modifier.padding(8.dp))
-                    Text(e.label)
-                }
-            }
-            SwitchItem(
-                "搜索建议", settings.searchSuggestions,
-                subtitle = "输入时将关键词发送给所选搜索引擎以获取联想词；无痕标签中不会发送",
-            ) { v -> update { it.copy(searchSuggestions = v) } }
-
-            Section("标签页")
-            Text(
-                "自动归档未使用的标签",
-                Modifier.padding(horizontal = 24.dp, vertical = 6.dp), style = MaterialTheme.typography.bodyLarge,
-            )
-            ArchiveAfter.entries.forEach { a ->
-                Row(
-                    Modifier.fillMaxWidth()
-                        .selectable(selected = settings.archiveAfter == a, role = Role.RadioButton) {
-                            update { it.copy(archiveAfter = a) }
-                        }
-                        .padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    RadioButton(selected = settings.archiveAfter == a, onClick = null, modifier = Modifier.padding(8.dp))
-                    Text(a.label)
-                }
-            }
-            MenuItem("查看已归档的标签") { ui.openPage(Screen.ARCHIVED) }
-
-            Section("隐私与屏蔽")
-            val adSubtitle = when (val s = adStatus) {
-                AdBlocker.Status.Installing -> "正在安装 uBlock Origin…"
-                is AdBlocker.Status.Ready -> "uBlock Origin ${s.version}" + if (s.enabled) " · 已启用" else " · 已停用"
-                is AdBlocker.Status.Failed -> "不可用：${s.message}"
-            }
-            SwitchItem("广告屏蔽", settings.adBlockEnabled, subtitle = adSubtitle) { v ->
-                app.adBlocker.setEnabled(app.runtime, v)
-            }
-            if (adStatus is AdBlocker.Status.Ready) {
-                MenuItem("uBlock Origin 设置", subtitle = "过滤规则列表、信任站点（白名单）、自定义规则") {
-                    val url = app.adBlocker.optionsPageUrl
-                    if (url != null) activity.openInNewTab(url) else activity.toast("uBlock Origin 未提供设置页")
-                }
-                MenuItem("检查 uBlock Origin 更新", subtitle = "通过 addons.mozilla.org 检查（过滤规则由 uBlock Origin 自动更新）") {
-                    activity.toast("正在检查…")
-                    app.adBlocker.checkForUpdate(app.runtime) { activity.toast(it) }
-                }
-            }
-            SwitchItem(
-                "严格跟踪保护", settings.strictTrackingProtection,
-                subtitle = "额外拦截全部社交媒体跟踪器与指纹识别脚本；少数网站或登录流程可能异常，可在页面菜单中对单个网站关闭",
-            ) { v -> update { it.copy(strictTrackingProtection = v) } }
-            SwitchItem(
-                "仅 HTTPS 模式", settings.httpsOnly,
-                subtitle = "自动升级到加密连接；不支持 HTTPS 的网站将无法打开",
-            ) { v -> update { it.copy(httpsOnly = v) } }
-            MenuItem("清除浏览数据") { showClear = true }
-
-            Section("更新")
-            UpdateSection(activity)
-
-            Section("关于")
-            MenuItem(
-                "银耳浏览器 ${BuildConfig.VERSION_NAME}",
-                subtitle = "内核 GeckoView ${GeckoBuildConfig.MOZ_APP_VERSION}（Mozilla）。个人自用的独立项目，与任何浏览器厂商无关。",
-            ) {}
-            MenuItem("开源许可") { showLicenses = true }
-            Spacer(Modifier.height(24.dp))
-        }
-    }
-
-    if (showClear) ClearDataDialog(activity) { showClear = false }
-    if (showLicenses) {
-        AlertDialog(
-            onDismissRequest = { showLicenses = false },
-            title = { Text("开源许可") },
-            text = {
-                Text(
-                    "GeckoView — Mozilla Public License 2.0\nhttps://www.mozilla.org/MPL/2.0/\n\n" +
-                        "uBlock Origin ${AdBlocker.BUNDLED_VERSION}（Raymond Hill 等）— GPL-3.0\n" +
-                        "源代码：https://github.com/gorhill/uBlock\n本应用内置的是 addons.mozilla.org 发布的官方签名版本，未做任何修改。\n\n" +
-                        "AndroidX / Jetpack Compose / Kotlin — Apache License 2.0",
-                )
-            },
-            confirmButton = { TextButton(onClick = { showLicenses = false }) { Text("好") } },
-        )
-    }
-}
-
-@Composable
-private fun Section(title: String) {
-    HorizontalDivider(Modifier.padding(top = 8.dp))
-    Text(
-        title, Modifier.padding(start = 24.dp, top = 16.dp, bottom = 4.dp),
-        style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold,
-    )
-}
+// ---------------------------------------------------------------------------- 清除数据
 
 @Composable
 private fun ClearDataDialog(activity: MainActivity, onDismiss: () -> Unit) {

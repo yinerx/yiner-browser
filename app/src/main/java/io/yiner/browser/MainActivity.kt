@@ -22,6 +22,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
+import androidx.core.graphics.scale
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -165,9 +167,12 @@ class MainActivity : ComponentActivity(), UiHost {
                 showBrowser()
             }
             Intent.ACTION_MAIN -> if (coldStart) {
-                // 从桌面冷启动：回到主页（已恢复的标签在标签网格中），直接弹出搜索框
-                ui.screen = Screen.HOME
-                ui.search = io.yiner.browser.ui.SearchRequest("", inCurrentTab = false, isPrivate = false)
+                // 从桌面冷启动：停在当前标签（没有标签时停在标签切换页）；
+                // 开启“自动弹出键盘”时直接叠加搜索面板（05 设置项 Auto-Open Keyboard）
+                ui.screen = if (tm.selectedTab != null) Screen.BROWSER else Screen.TABS
+                if (app.prefs.settings.value.autoOpenKeyboard || tm.selectedTab == null) {
+                    ui.search = io.yiner.browser.ui.SearchRequest("", inCurrentTab = false, isPrivate = false)
+                }
             }
         }
     }
@@ -175,7 +180,35 @@ class MainActivity : ComponentActivity(), UiHost {
     fun showBrowser() {
         ui.search = null
         ui.menuOpen = false
-        ui.screen = Screen.BROWSER
+        ui.siteSettingsOpen = false
+        ui.leavePages(Screen.BROWSER)
+    }
+
+    /** 回到标签切换页：先给当前网页截一张缩略图，供卡片显示。 */
+    fun showTabs() {
+        captureThumbnail()
+        ui.menuOpen = false
+        ui.leavePages(Screen.TABS)
+    }
+
+    /** 截取当前网页的缩略图（缩小到宽 360px，只保存在内存中）。 */
+    fun captureThumbnail() {
+        val tab = app.tabManager.selectedTab ?: return
+        if (ui.screen != Screen.BROWSER || geckoView.session == null || geckoView.width == 0) return
+        geckoView.capturePixels().accept({ bmp ->
+            if (bmp == null || bmp.width == 0) return@accept
+            val w = 360
+            val h = (bmp.height * w / bmp.width.toFloat()).toInt().coerceAtLeast(1)
+            val scaled = bmp.scale(w, h)
+            if (scaled !== bmp) bmp.recycle()
+            tab.thumbnail.value = scaled.asImageBitmap()
+        }, { /* 页面尚未绘制等情况：保留旧缩略图 */ })
+    }
+
+    fun setTextZoom(percent: Int) {
+        val p = percent.coerceIn(50, 300)
+        app.prefs.update { it.copy(textZoomPercent = p) }
+        io.yiner.browser.browser.AdBlocker.applyRuntimeSettings(app.runtime, app.prefs.settings.value)
     }
 
     // ------------------------------------------------------------------ 浏览操作（供界面调用）

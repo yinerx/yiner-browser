@@ -17,6 +17,7 @@ enum class BackAction {
     GO_BACK_IN_PAGE,
     CLOSE_TAB_AND_RETURN_TO_APP,
     CLOSE_TAB_AND_SHOW_PARENT,
+    /** 回到标签切换页（原“主页”；界面改为横向卡片后不再有单独主页）。 */
     SHOW_HOME,
 
     /** 不拦截，交给系统（回到桌面，支持预测性返回动画）。 */

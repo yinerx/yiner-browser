@@ -21,6 +21,8 @@ data class TabState(
     val trackingExempt: Boolean = false,
     /** 当前站点能否设置跟踪保护例外（GeckoView 是否给出了对应权限对象）。 */
     val trackingToggleAvailable: Boolean = false,
+    /** 本页被 Gecko 增强型跟踪保护拦截的请求数（不含 uBlock Origin 的拦截，GeckoView 不提供该计数）。 */
+    val blockedCount: Int = 0,
 )
 
 class Tab(
@@ -41,6 +43,9 @@ class Tab(
 
     /** 为节省内存，长时间未用的非无痕标签会被释放会话，仅保留 [sessionState]。 */
     var session: GeckoSession? = null
+
+    /** 网页缩略图（仅内存，用于底栏与标签切换卡片）。 */
+    val thumbnail = MutableStateFlow<androidx.compose.ui.graphics.ImageBitmap?>(null)
     var trackingPermission: ContentPermission? = null
 
     fun update(transform: (TabState) -> TabState) = _state.update(transform)

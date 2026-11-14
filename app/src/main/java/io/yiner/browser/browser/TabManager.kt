@@ -20,6 +20,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import org.mozilla.geckoview.AllowOrDeny
+import org.mozilla.geckoview.ContentBlocking
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoSession
@@ -389,7 +390,7 @@ class TabManager(
 
         session.progressDelegate = object : GeckoSession.ProgressDelegate {
             override fun onPageStart(session: GeckoSession, url: String) {
-                tab.update { it.copy(loading = true, progress = 5) }
+                tab.update { it.copy(loading = true, progress = 5, blockedCount = 0) }
             }
 
             override fun onPageStop(session: GeckoSession, success: Boolean) {
@@ -412,6 +413,12 @@ class TabManager(
                     tab.sessionState = sessionState.toString()
                     scheduleSave()
                 }
+            }
+        }
+
+        session.contentBlockingDelegate = object : ContentBlocking.Delegate {
+            override fun onContentBlocked(session: GeckoSession, event: ContentBlocking.BlockEvent) {
+                tab.update { it.copy(blockedCount = it.blockedCount + 1) }
             }
         }
 

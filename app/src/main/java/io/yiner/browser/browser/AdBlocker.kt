@@ -190,6 +190,8 @@ class AdBlocker(private val context: Context, private val prefs: Prefs) {
                 )
                 setStrictSocialTrackingProtection(s.strictTrackingProtection)
             }
+            runtime.settings.setAutomaticFontSizeAdjustment(false)
+            runtime.settings.setFontSizeFactor(s.textZoomPercent / 100f)
             runtime.settings.setAllowInsecureConnections(
                 if (s.httpsOnly) GeckoRuntimeSettings.HTTPS_ONLY else GeckoRuntimeSettings.ALLOW_ALL,
             )

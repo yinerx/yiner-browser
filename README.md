@@ -29,6 +29,29 @@ adb install -r yiner-browser-0.2.0.apk
 
 首次启动时会在本地安装内置的 uBlock Origin，大约需要几秒钟，进度可在“设置 → 广告屏蔽”中查看。
 
+## 界面（feature/arc-search-android-ui 测试版）
+
+本分支按 Android 版 Arc Search 公开 beta（2024-10）的实操截图，重做了浏览器界面：
+- 浏览时网页占满屏幕，底部是轻薄工具栏（标签缩略图 / 白色胶囊“+” / “^”展开菜单）；
+- 上拉的页面菜单，包括地址胶囊、固定 / 查找 / 分享、文字缩放、桌面版网站、网站设置；
+- 叠在网页上的搜索面板；
+- 横向标签卡片；
+- 分组式设置页。
+
+尺寸和颜色都取自参考图的像素测量，依据与差异见 [docs/arc-search-android-ui-references.md](docs/arc-search-android-ui-references.md)。
+
+需要说明的几点：
+- 仍使用 **GeckoView** 内核，还没有满足“完整 Chromium 内核”的要求，原因见 [docs/chromium-engine-feasibility.md](docs/chromium-engine-feasibility.md)；
+- 没有任何 AI 功能，也没有翻译功能；
+- 本界面**未在真机上验证**。
+
+离线渲染界面截图（不是设备截图）：
+
+```bash
+./gradlew testDebugUnitTest -Pyiner.screenshots=true --tests 'io.yiner.browser.ui.UiScreenshotTest'
+# 输出：build/ui-screenshots/*.png
+```
+
 ## 功能与实现状态
 
 “已实现”指代码已完成并通过编译、Lint 和单元测试，**不代表已在真机上验证**。

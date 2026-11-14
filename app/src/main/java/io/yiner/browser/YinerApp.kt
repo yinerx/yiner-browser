@@ -36,7 +36,10 @@ class YinerApp : Application() {
             .remoteDebuggingEnabled(false)
             .consoleOutput(BuildConfig.DEBUG)
             .build()
-        GeckoRuntime.create(this, settings).also { adBlocker.start(it) }
+        GeckoRuntime.create(this, settings).also {
+            AdBlocker.applyRuntimeSettings(it, s)
+            adBlocker.start(it)
+        }
     }
 
     val tabManager: TabManager by lazy {
