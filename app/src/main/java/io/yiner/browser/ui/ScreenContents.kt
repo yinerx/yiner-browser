@@ -3,19 +3,29 @@ package io.yiner.browser.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.exclude
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsBottomHeight
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -26,13 +36,20 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.max
 import androidx.compose.ui.unit.sp
 import io.yiner.browser.core.UrlInput
 import io.yiner.browser.ui.arc.ActionTiles
@@ -167,6 +184,21 @@ sealed interface SearchItem {
     }
 }
 
+/** 搜索胶囊顶边在可用高度中的位置：约从上往下 20%。 */
+internal const val SEARCH_PILL_ANCHOR = 0.2f
+
+/**
+ * 搜索胶囊顶边到安全区域顶部的距离。
+ * [stableHeight] 必须是不随键盘变化的可用高度，这样键盘、联想条数、加载状态都不会让胶囊移动；
+ * 高度很小时（分屏、横屏）至少留出面板顶边距。
+ */
+internal fun searchPillTop(stableHeight: Dp): Dp =
+    max(stableHeight * SEARCH_PILL_ANCHOR, ArcTokens.SheetTopPadding + 8.dp)
+
+/** 测试用标识。 */
+internal const val TAG_SEARCH_PILL = "search-pill"
+internal const val TAG_SEARCH_LIST = "search-list"
+
 @Composable
 fun SearchPanelContent(
     value: TextFieldValue,
@@ -183,63 +215,84 @@ fun SearchPanelContent(
             Modifier.fillMaxSize().background(ArcTokens.SearchScrim)
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
         )
-        Column(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
-            Spacer(Modifier.weight(1f))
-            ArcSheet {
-                Spacer(Modifier.height(ArcTokens.SheetTopPadding))
-                if (isPrivate) {
-                    Text(
-                        "无痕标签：不记录历史，关闭全部无痕标签后清除 Cookie",
-                        Modifier.padding(start = 28.dp, bottom = 10.dp), fontSize = 14.sp, color = PrivateTint, fontWeight = FontWeight.Medium,
-                    )
-                }
-                SearchPill(
-                    value = value,
-                    onValueChange = onValueChange,
-                    placeholder = if (isPrivate) "无痕搜索…" else "搜索…",
-                    focusRequester = focusRequester,
-                    onGo = onGo,
-                    trailing = if (value.text.isNotEmpty()) {
-                        {
-                            IconButton(onClick = { onValueChange(TextFieldValue("")) }) {
-                                Icon(ArcIcons.Close, "清空", Modifier.size(22.dp), tint = ArcTokens.Placeholder)
-                            }
-                        }
-                    } else {
-                        null
-                    },
-                )
-                // 03：胶囊底到第一行中心约 144 px ≈ 53dp（半行 33dp + 20dp）
-                Spacer(Modifier.height(20.dp))
-                LazyColumn(Modifier.fillMaxWidth().heightIn(max = ArcTokens.SuggestionRowHeight * 4.5f)) {
-                    items(items, key = { it.key }) { item ->
-                        when (item) {
-                            is SearchItem.OpenTab -> SuggestionRow(
-                                item.title,
-                                leading = { SiteBadge(item.host.ifBlank { item.title }, ArcTokens.SuggestionIcon, item.isPrivate) },
-                                onClick = { onItem(item) },
-                            )
-                            is SearchItem.Pinned -> SuggestionRow(
-                                item.title.ifBlank { item.url },
-                                leading = { SiteBadge(UrlInput.displayHost(item.url), ArcTokens.SuggestionIcon) },
-                                onClick = { onItem(item) },
-                                trailing = { Icon(ArcIcons.Pin, "已固定", Modifier.size(22.dp), tint = ArcTokens.TextSecondary) },
-                            )
-                            is SearchItem.History -> SuggestionRow(
-                                item.title.ifBlank { item.url },
-                                leading = { SiteBadge(UrlInput.displayHost(item.url), ArcTokens.SuggestionIcon) },
-                                onClick = { onItem(item) },
-                            )
-                            is SearchItem.Suggest -> SuggestionRow(
-                                item.text,
-                                leading = { Icon(ArcIcons.Search, null, Modifier.size(24.dp), tint = ArcTokens.TextSecondary) },
-                                onClick = { onItem(item) },
-                            )
-                        }
+        // 只扣掉顶部和左右的安全区域（状态栏、刘海）；键盘与导航栏只压缩下方的联想列表
+        BoxWithConstraints(
+            Modifier.fillMaxSize().windowInsetsPadding(
+                WindowInsets.safeDrawing.exclude(WindowInsets.ime).only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
+            ),
+        ) {
+            // 应用是全面屏布局，键盘只以 insets 形式出现，maxHeight 本身不变；
+            // 个别旧系统仍会在键盘弹出时压缩窗口，因此记住同一宽度下见过的最大高度作为锚点依据
+            var stableHeight by remember(maxWidth) { mutableStateOf(maxHeight) }
+            if (maxHeight > stableHeight) stableHeight = maxHeight
+            val pillTop = searchPillTop(stableHeight)
+            Column(Modifier.fillMaxSize()) {
+                Box(Modifier.fillMaxWidth().height(pillTop - ArcTokens.SheetTopPadding), contentAlignment = Alignment.BottomStart) {
+                    if (isPrivate) {
+                        Text(
+                            "无痕标签：不记录历史，关闭全部无痕标签后清除 Cookie",
+                            Modifier.padding(start = 28.dp, end = 28.dp, bottom = 10.dp),
+                            fontSize = 14.sp, color = PrivateTint, fontWeight = FontWeight.Medium,
+                        )
                     }
                 }
-                Spacer(Modifier.height(8.dp))
-                Spacer(Modifier.navigationBarsPadding())
+                // 面板一直铺到屏幕底部；点面板空白处不关闭搜索
+                ArcSheet(Modifier.weight(1f).pointerInput(Unit) { detectTapGestures { } }) {
+                    Spacer(Modifier.height(ArcTokens.SheetTopPadding))
+                    Box(Modifier.testTag(TAG_SEARCH_PILL)) {
+                        SearchPill(
+                            value = value,
+                            onValueChange = onValueChange,
+                            placeholder = if (isPrivate) "无痕搜索…" else "搜索…",
+                            focusRequester = focusRequester,
+                            onGo = onGo,
+                            trailing = if (value.text.isNotEmpty()) {
+                                {
+                                    IconButton(onClick = { onValueChange(TextFieldValue("")) }) {
+                                        Icon(ArcIcons.Close, "清空", Modifier.size(22.dp), tint = ArcTokens.Placeholder)
+                                    }
+                                }
+                            } else {
+                                null
+                            },
+                        )
+                    }
+                    // 03：胶囊底到第一行中心约 144 px ≈ 53dp（半行 33dp + 20dp）
+                    Spacer(Modifier.height(20.dp))
+                    // 联想列表占满胶囊下方的剩余空间、独立滚动；条数变化只影响列表内部
+                    LazyColumn(
+                        Modifier.fillMaxWidth().weight(1f).testTag(TAG_SEARCH_LIST),
+                        contentPadding = PaddingValues(bottom = 8.dp),
+                    ) {
+                        items(items, key = { it.key }) { item ->
+                            when (item) {
+                                is SearchItem.OpenTab -> SuggestionRow(
+                                    item.title,
+                                    leading = { SiteBadge(item.host.ifBlank { item.title }, ArcTokens.SuggestionIcon, item.isPrivate) },
+                                    onClick = { onItem(item) },
+                                )
+                                is SearchItem.Pinned -> SuggestionRow(
+                                    item.title.ifBlank { item.url },
+                                    leading = { SiteBadge(UrlInput.displayHost(item.url), ArcTokens.SuggestionIcon) },
+                                    onClick = { onItem(item) },
+                                    trailing = { Icon(ArcIcons.Pin, "已固定", Modifier.size(22.dp), tint = ArcTokens.TextSecondary) },
+                                )
+                                is SearchItem.History -> SuggestionRow(
+                                    item.title.ifBlank { item.url },
+                                    leading = { SiteBadge(UrlInput.displayHost(item.url), ArcTokens.SuggestionIcon) },
+                                    onClick = { onItem(item) },
+                                )
+                                is SearchItem.Suggest -> SuggestionRow(
+                                    item.text,
+                                    leading = { Icon(ArcIcons.Search, null, Modifier.size(24.dp), tint = ArcTokens.TextSecondary) },
+                                    onClick = { onItem(item) },
+                                )
+                            }
+                        }
+                    }
+                    // 键盘或导航栏占据的底部：只让列表变矮，胶囊位置不受影响
+                    Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.ime.union(WindowInsets.navigationBars)))
+                }
             }
         }
     }
