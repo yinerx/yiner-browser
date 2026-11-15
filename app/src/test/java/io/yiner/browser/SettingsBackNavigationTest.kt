@@ -90,6 +90,16 @@ class SettingsBackNavigationTest {
         }
     }
 
+    @Test fun globalSiteSettingsKeepsRiskNotes() {
+        openSettingsFromHome()
+        compose.onNodeWithText("全局网站设置").performClick()
+        compose.waitForIdle()
+        assertEquals(Screen.SITE_SETTINGS_GLOBAL, ui.screen)
+        // 精简后仍保留的风险提示
+        compose.onNodeWithText("不支持 HTTPS 的网站将无法打开").performScrollTo().assertExists()
+        compose.onNodeWithText("不能保证拦截所有广告", substring = true).performScrollTo().assertExists()
+    }
+
     @Test fun webPageSettingsBackReturnsToSamePageWithoutHistoryBack() {
         val tm = activity.app.tabManager
         // Robolectric 没有 WebView provider，Service Worker 拦截无法初始化；与本测试无关，跳过

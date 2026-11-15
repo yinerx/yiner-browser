@@ -107,7 +107,7 @@ fun SettingsPage(activity: MainActivity) {
             autoOpenKeyboard = settings.autoOpenKeyboard,
             searchSuggestions = settings.searchSuggestions,
             versionName = BuildConfig.VERSION_NAME,
-            engineDescription = "内核：基于 Chromium 的系统 WebView（${TabManager.webViewPackageDescription(activity)}）· 个人自用的独立项目",
+            engineDescription = "内核：系统 WebView ${TabManager.webViewPackageDescription(activity)} · 个人独立项目",
             oldEngineDataLabel = oldEngineBytes?.let { DownloadNaming.formatSize(it) },
             themeLabel = settings.themeMode.label,
         ),
@@ -198,17 +198,17 @@ fun GlobalSiteSettingsPage(activity: MainActivity) {
     SettingsScaffold("全局网站设置", onBack = { activity.ui.closeTopOverlay() }) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding()) {
             SectionHeader("拦截")
-            SettingsRow(ArcIcons.Shield, "拦截广告", subtitle = "EasyList 规则：拦截广告请求并隐藏广告位", trailing = {
+            SettingsRow(ArcIcons.Shield, "拦截广告", trailing = {
                 ArcSwitch(settings.adBlockEnabled) { v -> activity.updateSettings { it.copy(adBlockEnabled = v) } }
             })
-            SettingsRow(ArcIcons.Shield, "拦截跟踪器", subtitle = "EasyPrivacy 规则：拦截分析与跟踪请求", trailing = {
+            SettingsRow(ArcIcons.Shield, "拦截跟踪器", trailing = {
                 ArcSwitch(settings.blockTrackers) { v -> activity.updateSettings { it.copy(blockTrackers = v) } }
             })
             val rules = when (val s = status) {
                 ContentBlocker.Status.Loading -> "正在加载规则…"
                 is ContentBlocker.Status.Ready ->
-                    "${s.versions}\n可执行的网络规则 ${s.ads.networkRules + s.trackers.networkRules} 条，元素隐藏规则 ${s.ads.cosmeticRules + s.trackers.cosmeticRules} 条；" +
-                        "跳过 ${s.ads.skippedRules + s.trackers.skippedRules} 条不支持的规则（通配符、正则、资源类型选项、脚本注入等）"
+                    "${s.versions}\n生效 ${s.ads.networkRules + s.trackers.networkRules + s.ads.cosmeticRules + s.trackers.cosmeticRules} 条，" +
+                        "不支持 ${s.ads.skippedRules + s.trackers.skippedRules} 条"
                 is ContentBlocker.Status.Failed -> "规则加载失败：${s.message}"
             }
             SettingsRow(null, if (updating) "正在更新规则…" else "更新过滤规则", subtitle = rules, onClick = {
@@ -219,13 +219,13 @@ fun GlobalSiteSettingsPage(activity: MainActivity) {
                     updating = false
                 }
             })
-            SettingsNote("拦截在 WebView 的请求拦截接口中进行，只覆盖网页发起的普通网络请求；不能修改网页脚本，也无法拦截 WebSocket。对单个网站关闭拦截请用页面菜单中的“网站设置”。")
+            SettingsNote("不能保证拦截所有广告。单个网站可在页面菜单的“网站设置”中关闭拦截。")
 
             SectionHeader("隐私")
-            SettingsRow(ArcIcons.Lock, "仅 HTTPS 模式", subtitle = "自动把网页地址从 http 升级为 https；不支持 HTTPS 的网站将无法打开", trailing = {
+            SettingsRow(ArcIcons.Lock, "仅 HTTPS 模式", subtitle = "不支持 HTTPS 的网站将无法打开", trailing = {
                 ArcSwitch(settings.httpsOnly) { v -> activity.updateSettings { it.copy(httpsOnly = v) } }
             })
-            SettingsRow(ArcIcons.Globe, "允许第三方 Cookie", subtitle = "默认关闭；部分网站的嵌入式登录或评论组件需要开启", trailing = {
+            SettingsRow(ArcIcons.Globe, "允许第三方 Cookie", subtitle = "部分网站的登录或评论框需要开启", trailing = {
                 ArcSwitch(settings.thirdPartyCookies) { v -> activity.updateSettings { it.copy(thirdPartyCookies = v) } }
             })
         }
@@ -380,7 +380,7 @@ fun ArchivedPage(activity: MainActivity) {
 
     SettingsScaffold("已归档", onBack = { activity.ui.closeTopOverlay() }) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("点按即可恢复标签。", Modifier.weight(1f).padding(start = 20.dp), fontSize = 14.sp, color = ArcTokens.TextSecondary)
+            Text("点按恢复标签", Modifier.weight(1f).padding(start = 20.dp), fontSize = 14.sp, color = ArcTokens.TextSecondary)
             TextButton(onClick = { scope.launch { withContext(Dispatchers.IO) { db.clearArchived() }; local++ } }) { Text("清空") }
         }
         if (items.isEmpty()) Empty("没有已归档的标签")

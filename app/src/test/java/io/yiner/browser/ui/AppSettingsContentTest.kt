@@ -46,6 +46,14 @@ class AppSettingsContentTest {
         assertEquals(emptyList<SettingsTarget>(), opened)
     }
 
+    @Test fun conciseNotesKeepPrivacyScopeAndDynamicValues() {
+        show()
+        // 精简说明时不能丢掉：联想词会发给搜索引擎（隐私范围）、旧数据大小（动态值）
+        compose.onNodeWithText("输入内容会发给搜索引擎；无痕标签除外").performScrollTo().assertExists()
+        compose.onNodeWithText("旧版本留下的 1 MB，已无法使用").performScrollTo().assertExists()
+        compose.onNodeWithText("银耳浏览器 0.3.0").performScrollTo().assertExists()
+    }
+
     @Test fun eachRowOpensItsTargetOnClick() {
         show()
         val rows = listOf(

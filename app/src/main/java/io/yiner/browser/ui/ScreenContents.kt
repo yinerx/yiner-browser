@@ -275,7 +275,7 @@ fun AppSettingsContent(
     SettingsScaffold("设置", onBack = onBack) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding()) {
             SectionHeader("全局")
-            SettingsRow(ArcIcons.Globe, "全局网站设置", subtitle = "广告屏蔽、跟踪保护、仅 HTTPS", onClick = { onOpen(SettingsTarget.GLOBAL_SITE) })
+            SettingsRow(ArcIcons.Globe, "全局网站设置", subtitle = "拦截广告和跟踪、仅 HTTPS", onClick = { onOpen(SettingsTarget.GLOBAL_SITE) })
 
             SectionHeader("默认")
             SettingsRow(
@@ -293,17 +293,17 @@ fun AppSettingsContent(
             SettingsRow(ArcIcons.History, "历史记录", onClick = { onOpen(SettingsTarget.HISTORY) })
             if (m.oldEngineDataLabel != null) {
                 SettingsRow(
-                    ArcIcons.Eraser, "清理旧内核数据", subtitle = "GeckoView 内核遗留 ${m.oldEngineDataLabel}，当前内核无法使用",
+                    ArcIcons.Eraser, "清理旧内核数据", subtitle = "旧版本留下的 ${m.oldEngineDataLabel}，已无法使用",
                     onClick = { onOpen(SettingsTarget.OLD_ENGINE_DATA) },
                 )
             }
 
             SectionHeader("选项")
             SettingsRow(ArcIcons.ThemeAuto, "外观", subtitle = m.themeLabel, onClick = { onOpen(SettingsTarget.APPEARANCE) })
-            SettingsRow(ArcIcons.Keyboard, "自动弹出键盘", subtitle = "打开应用时直接显示搜索面板", trailing = {
+            SettingsRow(ArcIcons.Keyboard, "自动弹出键盘", subtitle = "打开应用时直接显示搜索", trailing = {
                 ArcSwitch(m.autoOpenKeyboard, onAutoOpenKeyboard)
             })
-            SettingsRow(ArcIcons.Search, "搜索建议", subtitle = "向所选搜索引擎请求联想词；无痕标签不请求", trailing = {
+            SettingsRow(ArcIcons.Search, "搜索建议", subtitle = "输入内容会发给搜索引擎；无痕标签除外", trailing = {
                 ArcSwitch(m.searchSuggestions, onSearchSuggestions)
             })
 
@@ -349,10 +349,7 @@ fun AppearanceContent(selected: io.yiner.browser.core.ThemeMode, onSelect: (io.y
                     Icon(icon, null, Modifier.size(ArcTokens.EngineIcon * 0.8f), tint = ArcTokens.TextPrimary)
                 }
             }
-            io.yiner.browser.ui.arc.SettingsNote(
-                "“跟随系统”时随手机的浅色/深色设置即时切换；选择浅色或深色后不再跟随系统。" +
-                    "网页按其自身的深色样式（prefers-color-scheme）显示，没有深色样式的网页保持原样，不做反色；切换外观时已打开的网页会重新加载。",
-            )
+            io.yiner.browser.ui.arc.SettingsNote("网页没有深色样式时保持原样；切换后已打开的网页会重新加载。")
         }
     }
 }

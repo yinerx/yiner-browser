@@ -37,7 +37,7 @@ fun UpdateSection(activity: MainActivity) {
     val scope = rememberCoroutineScope()
 
     Text(
-        "当前版本 ${BuildConfig.VERSION_NAME}（versionCode ${BuildConfig.VERSION_CODE}）· 来源：github.com/${BuildConfig.UPDATE_REPO} 正式版 Release",
+        "当前版本 ${BuildConfig.VERSION_NAME}（versionCode ${BuildConfig.VERSION_CODE}）· 只从 github.com/${BuildConfig.UPDATE_REPO} 正式版更新",
         Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -85,17 +85,17 @@ fun UpdateSection(activity: MainActivity) {
         }
     }
 
-    SwitchItem("启动时检查更新", settings.checkOnStartup, subtitle = "距上次检查超过 12 小时才会真正请求 GitHub") { v ->
+    SwitchItem("启动时检查更新", settings.checkOnStartup, subtitle = "距上次检查超过 12 小时才检查") { v ->
         manager.updateSettings { it.copy(checkOnStartup = v) }
     }
-    SwitchItem("定期检查更新", settings.periodicCheck, subtitle = "约每天一次，在后台联网时进行") { v ->
+    SwitchItem("定期检查更新", settings.periodicCheck, subtitle = "约每天一次，在后台进行") { v ->
         manager.updateSettings { it.copy(periodicCheck = v) }
     }
-    SwitchItem("自动下载新版本", settings.autoDownload, subtitle = "下载完成后通知你；安装仍需你在系统对话框中确认") { v ->
+    SwitchItem("自动下载新版本", settings.autoDownload, subtitle = "下载好后通知你，安装仍需你确认") { v ->
         manager.updateSettings { it.copy(autoDownload = v) }
     }
     if (settings.autoDownload) {
-        SwitchItem("仅在 Wi-Fi 下自动下载", settings.autoDownloadWifiOnly, subtitle = "安装包约 200 MB；手动点“下载”不受此限制") { v ->
+        SwitchItem("仅在 Wi-Fi 下自动下载", settings.autoDownloadWifiOnly, subtitle = "手动下载不受此限制") { v ->
             manager.updateSettings { it.copy(autoDownloadWifiOnly = v) }
         }
     }
