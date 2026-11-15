@@ -443,14 +443,18 @@ fun SectionHeader(text: String) {
     )
 }
 
-/** 设置项（05：细线图标、无分割线、文字约 20sp，可带副标题与右侧开关）。 */
+/**
+ * 设置项（05：细线图标、无分割线、文字约 20sp，可带副标题与右侧开关）。
+ * onClick 必须是最后一个参数：写成尾随 lambda 时就是点击回调。若 trailing 在最后，`SettingsRow(...) { onOpen(x) }`
+ * 会被当成右侧内容、在组合时直接执行——0.3.0 的设置页就因此一打开就连跳二级页，返回回不到原处。
+ */
 @Composable
 fun SettingsRow(
     icon: ImageVector?,
     title: String,
     subtitle: String? = null,
-    onClick: (() -> Unit)? = null,
     trailing: @Composable (() -> Unit)? = null,
+    onClick: (() -> Unit)? = null,
 ) {
     Row(
         Modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)

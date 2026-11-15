@@ -26,6 +26,9 @@ data class SearchRequest(
     val isPrivate: Boolean,
 )
 
+/** 可被返回手势逐层关闭的界面层。 */
+enum class Overlay { SEARCH, SITE_SETTINGS, MENU, PAGE, FIND }
+
 class UiState {
     var screen by mutableStateOf(Screen.TABS)
     var search by mutableStateOf<SearchRequest?>(null)
@@ -50,17 +53,28 @@ class UiState {
         }
     }
 
-    /** 关闭最上层的一个浮层或页面，返回是否关闭了什么。 */
-    fun closeTopOverlay(): Boolean {
-        when {
-            search != null -> search = null
-            siteSettingsOpen -> siteSettingsOpen = false
-            menuOpen -> menuOpen = false
-            findOpen -> findOpen = false
-            onPage -> screen = backStack.removeLastOrNull() ?: Screen.TABS
-            else -> return false
+    /**
+     * 关闭最上层的一个浮层或页面，返回关闭的是哪一层（没有可关闭的返回 null）。
+     * 顺序与界面叠放一致：搜索面板 > 菜单类面板 > 设置及其二级页 > 页内查找栏。
+     * 查找栏属于网页界面，设置页盖在它上面时必须先关页面，否则返回会先关掉看不见的查找栏。
+     */
+    fun closeTopOverlay(): Overlay? {
+        val top = when {
+            search != null -> Overlay.SEARCH
+            siteSettingsOpen -> Overlay.SITE_SETTINGS
+            menuOpen -> Overlay.MENU
+            onPage -> Overlay.PAGE
+            findOpen -> Overlay.FIND
+            else -> return null
         }
-        return true
+        when (top) {
+            Overlay.SEARCH -> search = null
+            Overlay.SITE_SETTINGS -> siteSettingsOpen = false
+            Overlay.MENU -> menuOpen = false
+            Overlay.PAGE -> screen = backStack.removeLastOrNull() ?: Screen.TABS
+            Overlay.FIND -> findOpen = false
+        }
+        return top
     }
 
     fun leavePages(to: Screen) {

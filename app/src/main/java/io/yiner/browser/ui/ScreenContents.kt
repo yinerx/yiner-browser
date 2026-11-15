@@ -275,7 +275,7 @@ fun AppSettingsContent(
     SettingsScaffold("设置", onBack = onBack) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding()) {
             SectionHeader("全局")
-            SettingsRow(ArcIcons.Globe, "全局网站设置", subtitle = "广告屏蔽、跟踪保护、仅 HTTPS") { onOpen(SettingsTarget.GLOBAL_SITE) }
+            SettingsRow(ArcIcons.Globe, "全局网站设置", subtitle = "广告屏蔽、跟踪保护、仅 HTTPS", onClick = { onOpen(SettingsTarget.GLOBAL_SITE) })
 
             SectionHeader("默认")
             SettingsRow(
@@ -283,22 +283,23 @@ fun AppSettingsContent(
                 if (m.isDefaultBrowser) "已是默认浏览器" else "将银耳浏览器设为默认浏览器",
                 onClick = { onOpen(SettingsTarget.DEFAULT_BROWSER) },
             )
-            SettingsRow(ArcIcons.Search, "搜索引擎", subtitle = m.searchEngineLabel) { onOpen(SettingsTarget.SEARCH_ENGINES) }
+            SettingsRow(ArcIcons.Search, "搜索引擎", subtitle = m.searchEngineLabel, onClick = { onOpen(SettingsTarget.SEARCH_ENGINES) })
 
             SectionHeader("存储")
             SettingsRow(ArcIcons.Archive, "已归档", onClick = { onOpen(SettingsTarget.ARCHIVED) })
-            SettingsRow(ArcIcons.ArchiveTimer, "归档不活跃的标签", subtitle = m.archiveLabel) { onOpen(SettingsTarget.ARCHIVE_AFTER) }
+            SettingsRow(ArcIcons.ArchiveTimer, "归档不活跃的标签", subtitle = m.archiveLabel, onClick = { onOpen(SettingsTarget.ARCHIVE_AFTER) })
             SettingsRow(ArcIcons.Eraser, "清除浏览数据", onClick = { onOpen(SettingsTarget.CLEAR_DATA) })
             SettingsRow(ArcIcons.Folder, "下载", onClick = { onOpen(SettingsTarget.DOWNLOADS) })
             SettingsRow(ArcIcons.History, "历史记录", onClick = { onOpen(SettingsTarget.HISTORY) })
             if (m.oldEngineDataLabel != null) {
-                SettingsRow(ArcIcons.Eraser, "清理旧内核数据", subtitle = "GeckoView 内核遗留 ${m.oldEngineDataLabel}，当前内核无法使用") {
-                    onOpen(SettingsTarget.OLD_ENGINE_DATA)
-                }
+                SettingsRow(
+                    ArcIcons.Eraser, "清理旧内核数据", subtitle = "GeckoView 内核遗留 ${m.oldEngineDataLabel}，当前内核无法使用",
+                    onClick = { onOpen(SettingsTarget.OLD_ENGINE_DATA) },
+                )
             }
 
             SectionHeader("选项")
-            SettingsRow(ArcIcons.ThemeAuto, "外观", subtitle = m.themeLabel) { onOpen(SettingsTarget.APPEARANCE) }
+            SettingsRow(ArcIcons.ThemeAuto, "外观", subtitle = m.themeLabel, onClick = { onOpen(SettingsTarget.APPEARANCE) })
             SettingsRow(ArcIcons.Keyboard, "自动弹出键盘", subtitle = "打开应用时直接显示搜索面板", trailing = {
                 ArcSwitch(m.autoOpenKeyboard, onAutoOpenKeyboard)
             })

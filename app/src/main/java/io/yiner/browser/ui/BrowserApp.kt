@@ -50,6 +50,11 @@ fun BrowserApp(activity: MainActivity) {
         }
     }
 
+    // 从设置返回到网页界面时，原标签可能已在设置期间被关闭或归档：没有标签就回到标签切换页，不停在空白页
+    LaunchedEffect(ui.screen, selected) {
+        if (ui.screen == Screen.BROWSER && selected == null) ui.screen = Screen.TABS
+    }
+
     val selectedState = selected?.state?.collectAsState()?.value
     val currentThumb = selected?.thumbnail?.collectAsState()?.value
 
@@ -76,8 +81,7 @@ fun BrowserApp(activity: MainActivity) {
         when (backAction) {
             BackAction.EXIT_FULLSCREEN -> activity.exitCustomView()
             BackAction.CLOSE_OVERLAY -> {
-                if (ui.findOpen) selected?.view?.clearMatches()
-                ui.closeTopOverlay()
+                if (ui.closeTopOverlay() == Overlay.FIND) selected?.view?.clearMatches()
             }
             BackAction.GO_BACK_IN_PAGE -> selected?.view?.goBack()
             BackAction.CLOSE_TAB_AND_RETURN_TO_APP -> {
